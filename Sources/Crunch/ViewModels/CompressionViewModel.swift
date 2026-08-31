@@ -109,8 +109,8 @@ final class CompressionViewModel {
             estimateMissingToolFormat = nil
             estimateUnsupportedFormat = nil
             previewPair = nil
-            estimationService.invalidate()
             estimationTask?.cancel()
+            estimationService.invalidate()
         } else {
             requestEstimate()
         }
