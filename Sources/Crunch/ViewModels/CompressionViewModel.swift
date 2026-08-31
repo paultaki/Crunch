@@ -202,7 +202,7 @@ final class CompressionViewModel {
             var pending = files.makeIterator()
 
             for _ in 0..<maxConcurrency {
-                guard let file = pending.next() else { break }
+                guard !Task.isCancelled, let file = pending.next() else { break }
                 group.addTask { await self.compressSingleFile(file) }
             }
 
@@ -211,7 +211,12 @@ final class CompressionViewModel {
                 completed += 1
                 state = .compressing(completed: completed, total: total)
 
-                if let file = pending.next() {
+                // Once cancelled, stop pulling new work from `pending` and
+                // just drain the tasks already in flight — otherwise
+                // `addTask` (which doesn't itself check cancellation) keeps
+                // topping up the window and Cancel never actually stops
+                // new files from starting.
+                if !Task.isCancelled, let file = pending.next() {
                     group.addTask { await self.compressSingleFile(file) }
                 }
             }
