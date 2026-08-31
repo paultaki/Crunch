@@ -18,6 +18,11 @@ final class CompressionViewModel {
 
     private(set) var estimatedCompressedSize: Int64?
     private(set) var isEstimating: Bool = false
+    /// Set when the estimate couldn't run because a required compressor
+    /// (pngquant/cwebp) is missing, so the UI can show an inline install
+    /// notice instead of a silent dash. `nil` once the tool is found or the
+    /// format no longer needs it.
+    private(set) var estimateMissingToolFormat: ImageFormat?
 
     private let estimationService = EstimationService()
     private var estimationTask: Task<Void, Never>?
@@ -88,6 +93,7 @@ final class CompressionViewModel {
         if files.isEmpty {
             state = .empty
             estimatedCompressedSize = nil
+            estimateMissingToolFormat = nil
             estimationService.invalidate()
         } else {
             requestEstimate()
@@ -99,6 +105,7 @@ final class CompressionViewModel {
         results.removeAll()
         state = .empty
         estimatedCompressedSize = nil
+        estimateMissingToolFormat = nil
         estimationService.invalidate()
         estimationTask?.cancel()
     }
@@ -108,6 +115,7 @@ final class CompressionViewModel {
         results.removeAll()
         state = .empty
         estimatedCompressedSize = nil
+        estimateMissingToolFormat = nil
         estimationService.invalidate()
         estimationTask?.cancel()
     }
@@ -120,6 +128,7 @@ final class CompressionViewModel {
 
         guard !files.isEmpty else {
             estimatedCompressedSize = nil
+            estimateMissingToolFormat = nil
             isEstimating = false
             return
         }
@@ -133,14 +142,24 @@ final class CompressionViewModel {
 
             await MainActor.run { self?.isEstimating = true }
 
-            let result = await self?.estimationService.estimate(
+            let outcome = await self?.estimationService.estimate(
                 files: snapshotFiles,
                 settings: snapshotSettings
             )
 
             if Task.isCancelled { return }
             await MainActor.run {
-                self?.estimatedCompressedSize = result
+                switch outcome {
+                case .value(let size):
+                    self?.estimatedCompressedSize = size
+                    self?.estimateMissingToolFormat = nil
+                case .toolMissing(let format):
+                    self?.estimatedCompressedSize = nil
+                    self?.estimateMissingToolFormat = format
+                case .unavailable, .none:
+                    self?.estimatedCompressedSize = nil
+                    self?.estimateMissingToolFormat = nil
+                }
                 self?.isEstimating = false
             }
         }
@@ -260,9 +279,28 @@ final class CompressionViewModel {
 
     private func compressSingleFile(_ file: ImageFile) async -> CompressionResult {
         let outputFormat = settings.outputFormat.resolve(for: file.format)
+        let isConversion = outputFormat != file.format
 
         do {
             let output = try await CompressionPipeline.run(file: file, settings: settings)
+
+            // Never make a file worse: if compression didn't actually shrink
+            // it (same format, output >= what's already on disk), leave the
+            // original untouched and report "already optimized" instead of
+            // replacing it with a same-or-larger file. Format conversions
+            // are exempt — the user explicitly asked for a different format
+            // (e.g. png → webp), so that result is always delivered even if
+            // it happens to be larger.
+            if !isConversion, output.bytes >= file.originalSize {
+                try? FileManager.default.removeItem(at: output.url)
+                return CompressionResult(
+                    filename: file.filename,
+                    originalSize: file.originalSize,
+                    compressedSize: file.originalSize,
+                    error: nil,
+                    wasSkipped: true
+                )
+            }
 
             // Determine output path
             let outputURL: URL

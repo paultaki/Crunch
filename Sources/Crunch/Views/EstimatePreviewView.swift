@@ -9,6 +9,9 @@ struct EstimatePreviewView: View {
     let estimatedSize: Int64?
     let reduction: Double?
     let isEstimating: Bool
+    /// Set when the estimate couldn't run because a required compressor is
+    /// missing — shown as an inline install hint instead of a silent "—".
+    let missingToolFormat: ImageFormat?
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
@@ -51,29 +54,36 @@ struct EstimatePreviewView: View {
                 }
             }
 
-            HStack(spacing: 8) {
-                Text(originalSize.formattedBytes)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+            if let missingToolFormat,
+               let hint = MissingToolsMessage.compactInstallHint(for: missingToolFormat) {
+                Text(hint)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            } else {
+                HStack(spacing: 8) {
+                    Text(originalSize.formattedBytes)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
 
-                Image(systemName: "arrow.right")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
 
-                Group {
-                    if let estimated = estimatedSize {
-                        Text("~\(estimated.formattedBytes)")
-                            .foregroundStyle(.primary)
-                            .fontWeight(.semibold)
-                            .monospacedDigit()
-                            .contentTransition(.numericText(value: Double(estimated)))
-                    } else {
-                        Text(isEstimating ? "calculating…" : "—")
-                            .foregroundStyle(.tertiary)
+                    Group {
+                        if let estimated = estimatedSize {
+                            Text("~\(estimated.formattedBytes)")
+                                .foregroundStyle(.primary)
+                                .fontWeight(.semibold)
+                                .monospacedDigit()
+                                .contentTransition(.numericText(value: Double(estimated)))
+                        } else {
+                            Text(isEstimating ? "calculating…" : "—")
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                 }
+                .font(.callout)
             }
-            .font(.callout)
         }
     }
 

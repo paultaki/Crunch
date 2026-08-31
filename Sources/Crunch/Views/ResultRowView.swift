@@ -10,6 +10,8 @@ struct ResultRowView: View {
         case .green: .green
         case .yellow: .yellow
         case .gray: .secondary
+        case .skipped: .secondary
+        case .grew: .orange
         case .red: .red
         }
     }
@@ -28,7 +30,11 @@ struct ResultRowView: View {
 
             Spacer()
 
-            if let compressed = result.compressedSize {
+            if result.wasSkipped {
+                Text("Already optimized")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if let compressed = result.compressedSize {
                 HStack(spacing: 6) {
                     Text(result.originalSize.formattedBytes)
                         .foregroundStyle(.secondary)
@@ -43,11 +49,7 @@ struct ResultRowView: View {
                 }
                 .font(.caption)
 
-                Text(String(format: "−%.0f%%", result.reduction))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(tierColor)
-                    .frame(width: 52, alignment: .trailing)
-                    .monospacedDigit()
+                reductionLabel
             } else {
                 Text(result.error ?? "Failed")
                     .font(.caption)
@@ -65,6 +67,29 @@ struct ResultRowView: View {
         .contentShape(Rectangle())
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) { isHovering = hovering }
+        }
+    }
+
+    /// Reduction badge. `reduction` is negative when a format conversion
+    /// grew the file (the only case that reaches here with a negative
+    /// value — the never-worse guard skips same-format growth entirely).
+    /// Branching on sign rather than hardcoding a "−" prefix keeps the
+    /// double-minus bug ("−-12%") impossible by construction (mirrors
+    /// `EstimatePreviewView`'s trailingBadge).
+    @ViewBuilder
+    private var reductionLabel: some View {
+        if result.reduction >= 0 {
+            Text(String(format: "−%.0f%%", result.reduction))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tierColor)
+                .frame(width: 52, alignment: .trailing)
+                .monospacedDigit()
+        } else {
+            Text(String(format: "+%.0f%%", -result.reduction))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 52, alignment: .trailing)
+                .monospacedDigit()
         }
     }
 }

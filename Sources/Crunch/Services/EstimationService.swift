@@ -17,21 +17,37 @@ final class EstimationService {
         let resolutionPercent: Int
     }
 
+    /// Result of an estimate attempt. Distinguishes "the required compressor
+    /// isn't installed" from other bail-out reasons (empty queue, decode
+    /// failure, cancellation) so the UI can show an actionable install
+    /// notice instead of a silent "—".
+    enum Outcome: Equatable {
+        case value(Int64)
+        case toolMissing(ImageFormat)
+        case unavailable
+    }
+
     /// Per-settings sample-compression ratios. Cardinality is bounded
     /// (sample files × formats × quality × resolution) so we don't bother
     /// with eviction — wiggling the slider is instant.
     private var ratioCache: [Key: Double] = [:]
 
     /// Returns an estimate of the total compressed byte size for `files`
-    /// at `settings`, or `nil` if estimation fails (tool missing, decode
-    /// failure, cancellation, etc.). Safe to call concurrently — new calls
-    /// simply cancel in-flight ones via Swift structured concurrency.
+    /// at `settings`, or an `.unavailable`/`.toolMissing` outcome if
+    /// estimation can't run (decode failure, cancellation, missing
+    /// compressor, etc.). Safe to call concurrently — new calls simply
+    /// cancel in-flight ones via Swift structured concurrency.
     func estimate(
         files: [ImageFile],
         settings: CompressionSettings
-    ) async -> Int64? {
-        guard !files.isEmpty else { return nil }
-        guard let sample = Self.pickSample(files) else { return nil }
+    ) async -> Outcome {
+        guard !files.isEmpty else { return .unavailable }
+        guard let sample = Self.pickSample(files) else { return .unavailable }
+
+        let outputFormat = settings.outputFormat.resolve(for: sample.format)
+        if ToolChecker.missingTools(for: [outputFormat]) != nil {
+            return .toolMissing(outputFormat)
+        }
 
         let key = Key(
             sampleID: sample.id,
@@ -45,13 +61,13 @@ final class EstimationService {
             ratio = cached
         } else {
             guard let measured = await compressSample(sample, settings: settings)
-            else { return nil }
+            else { return .unavailable }
             ratioCache[key] = measured
             ratio = measured
         }
 
         let totalOriginal = files.reduce(Int64(0)) { $0 + $1.originalSize }
-        return Int64(Double(totalOriginal) * ratio)
+        return .value(Int64(Double(totalOriginal) * ratio))
     }
 
     /// Median-by-size file is the most "representative" of a mixed batch —
@@ -69,13 +85,8 @@ final class EstimationService {
         _ file: ImageFile,
         settings: CompressionSettings
     ) async -> Double? {
-        let outputFormat = settings.outputFormat.resolve(for: file.format)
-
-        // Bail early if the compressor this sample needs isn't installed.
-        if ToolChecker.missingTools(for: [outputFormat]) != nil {
-            return nil
-        }
-
+        // Tool availability is checked by the caller (`estimate`) before we
+        // get here, so it can report `.toolMissing` distinctly.
         guard file.originalSize > 0 else { return nil }
 
         do {

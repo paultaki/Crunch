@@ -87,7 +87,8 @@ struct ContentView: View {
                 originalSize: viewModel.totalOriginalSize,
                 estimatedSize: viewModel.estimatedCompressedSize,
                 reduction: viewModel.estimatedReduction,
-                isEstimating: viewModel.isEstimating
+                isEstimating: viewModel.isEstimating,
+                missingToolFormat: viewModel.estimateMissingToolFormat
             )
             .animation(
                 .spring(response: 0.45, dampingFraction: 0.85),

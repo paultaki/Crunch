@@ -19,9 +19,22 @@ enum ToolChecker {
     ]
 
     /// Returns the absolute path to `tool` if it exists on disk, else `nil`.
+    ///
+    /// Falls back to scanning `PATH` when none of the three fixed locations
+    /// have it — covers custom Homebrew prefixes, linuxbrew-style setups, or
+    /// anything installed outside the common defaults. Plain directory
+    /// `stat` calls (no subprocess) keep this synchronous and cheap.
     static func resolve(_ tool: String) -> String? {
         let fm = FileManager.default
         for dir in searchPaths {
+            let candidate = "\(dir)/\(tool)"
+            if fm.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+
+        guard let pathEnv = ProcessInfo.processInfo.environment["PATH"] else { return nil }
+        for dir in pathEnv.split(separator: ":") {
             let candidate = "\(dir)/\(tool)"
             if fm.isExecutableFile(atPath: candidate) {
                 return candidate

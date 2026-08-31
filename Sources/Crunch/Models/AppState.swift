@@ -55,14 +55,17 @@ enum OutputFormat: String, CaseIterable {
 }
 
 enum ColorTier {
-    case green   // >50% reduction
-    case yellow  // 25-50%
-    case gray    // <25%
-    case red     // failed
+    case green    // >50% reduction
+    case yellow   // 25-50%
+    case gray     // <25%
+    case skipped  // already optimized — original kept, nothing replaced
+    case grew     // format conversion that grew the file
+    case red      // failed
 
     static func from(reduction: Double) -> ColorTier {
         if reduction > 50 { .green }
         else if reduction > 25 { .yellow }
+        else if reduction < 0 { .grew }
         else { .gray }
     }
 }
