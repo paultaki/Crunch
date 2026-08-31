@@ -22,6 +22,13 @@ struct ComparePreviewView: View {
     @State private var dividerFraction: CGFloat = 0.5
     @State private var originalBytes: Int64 = 0
     @State private var compressedBytes: Int64 = 0
+    /// Flipped once `loadImages` has run, so a failed decode shows a terse
+    /// explanation instead of a spinner that never resolves. The sample temps
+    /// live in the system temp directory and a newer estimate (or
+    /// `invalidate()`) can delete them while this sheet is open.
+    @State private var didAttemptLoad = false
+
+    private var hasImages: Bool { originalImage != nil && compressedImage != nil }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,9 +36,11 @@ struct ComparePreviewView: View {
             Divider()
             imageArea
                 .padding(20)
-            labels
-                .padding(.horizontal, 24)
-                .padding(.bottom, 20)
+            if hasImages {
+                labels
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 20)
+            }
         }
         .frame(minWidth: 640, minHeight: 480)
         .onAppear(perform: loadImages)
@@ -92,10 +101,26 @@ struct ComparePreviewView: View {
                 .contentShape(Rectangle())
                 .gesture(dragGesture(width: size.width))
             }
+        } else if didAttemptLoad {
+            unavailable
         } else {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private var unavailable: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "photo.badge.exclamationmark")
+                .font(.title)
+                .foregroundStyle(.secondary)
+            Text("Preview unavailable")
+                .font(.callout.weight(.medium))
+            Text("The sample files were replaced by a newer estimate.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func dragGesture(width: CGFloat) -> some Gesture {
@@ -167,11 +192,16 @@ struct ComparePreviewView: View {
     /// open. `NSImage(contentsOf:)` routes through ImageIO, which on macOS
     /// 15 decodes AVIF and WebP natively — no format-specific handling
     /// needed here.
+    ///
+    /// Either decode returning nil means the file is gone or unreadable; the
+    /// sheet falls back to `unavailable` rather than watching the filesystem
+    /// to recover, since the pair is inherently transient.
     private func loadImages() {
         originalImage = NSImage(contentsOf: original)
         compressedImage = NSImage(contentsOf: compressed)
         originalBytes = Self.fileSize(of: original)
         compressedBytes = Self.fileSize(of: compressed)
+        didAttemptLoad = true
     }
 
     private static func fileSize(of url: URL) -> Int64 {
