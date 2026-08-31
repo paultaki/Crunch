@@ -219,17 +219,10 @@ final class CompressionViewModel {
 
     private func compressSingleFile(_ file: ImageFile) async -> CompressionResult {
         let outputFormat = settings.outputFormat.resolve(for: file.format)
-        let quality = settings.quality
-        let resolutionPercent = settings.resolutionPercent
-
-        let resize: (Int, Int)?
-        if resolutionPercent < 100 {
-            resize = file.resizedDimensions(percent: resolutionPercent)
-        } else {
-            resize = nil
-        }
 
         do {
+            let output = try await CompressionPipeline.run(file: file, settings: settings)
+
             // Determine output path
             let outputURL: URL
             if outputFormat == file.format {
@@ -240,53 +233,11 @@ final class CompressionViewModel {
                     .appendingPathExtension(outputFormat.fileExtension)
             }
 
-            // Create temp file for compression output
-            let tempDir = FileManager.default.temporaryDirectory
-            let tempFile = tempDir.appendingPathComponent(
-                "\(UUID().uuidString).\(outputFormat.fileExtension)"
-            )
-
-            // Resize if needed (skip for WebP — cwebp handles resize natively)
-            let inputForCompression: URL
-            let needsManualResize = resize != nil && outputFormat != .webp
-            if needsManualResize, let resize {
-                inputForCompression = try await ImageResizer.resize(
-                    input: file.url,
-                    width: resize.0,
-                    height: resize.1
-                )
-            } else {
-                inputForCompression = file.url
-            }
-
-            // Compress
-            switch outputFormat {
-            case .png:
-                try await PNGCompressor.compress(
-                    input: inputForCompression,
-                    output: tempFile,
-                    quality: quality
-                )
-            case .jpeg:
-                try await JPEGCompressor.compress(
-                    input: inputForCompression,
-                    output: tempFile,
-                    quality: quality
-                )
-            case .webp:
-                try await WebPCompressor.compress(
-                    input: inputForCompression,
-                    output: tempFile,
-                    quality: quality,
-                    resize: resize
-                )
-            }
-
             // Move temp to final location
             if FileManager.default.fileExists(atPath: outputURL.path) {
-                _ = try FileManager.default.replaceItemAt(outputURL, withItemAt: tempFile)
+                _ = try FileManager.default.replaceItemAt(outputURL, withItemAt: output.url)
             } else {
-                try FileManager.default.moveItem(at: tempFile, to: outputURL)
+                try FileManager.default.moveItem(at: output.url, to: outputURL)
             }
 
             // If the output landed at a different path than the source (format
@@ -297,18 +248,10 @@ final class CompressionViewModel {
                 try? FileManager.default.removeItem(at: file.url)
             }
 
-            // Clean up resized temp if we created one
-            if needsManualResize && inputForCompression != file.url {
-                try? FileManager.default.removeItem(at: inputForCompression)
-            }
-
-            let compressedSize = try outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
-                .map(Int64.init) ?? 0
-
             return CompressionResult(
                 filename: outputURL.lastPathComponent,
                 originalSize: file.originalSize,
-                compressedSize: compressedSize,
+                compressedSize: output.bytes,
                 error: nil
             )
         } catch {

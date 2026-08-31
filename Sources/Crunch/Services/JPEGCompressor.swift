@@ -36,12 +36,14 @@ enum JPEGCompressor {
 
 enum CompressionError: LocalizedError {
     case cannotReadImage(String)
+    case cannotCreateContext(String)
     case cannotWriteImage(String)
     case toolMissing(String)
 
     var errorDescription: String? {
         switch self {
         case .cannotReadImage(let name): "Cannot read image: \(name)"
+        case .cannotCreateContext(let name): "Cannot create drawing context for: \(name)"
         case .cannotWriteImage(let name): "Cannot write image: \(name)"
         case .toolMissing(let name): "Required tool not found: \(name)"
         }

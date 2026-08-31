@@ -62,84 +62,26 @@ final class EstimationService {
         return sorted[sorted.count / 2]
     }
 
-    /// Runs the sample through the real compression pipeline and returns
+    /// Runs the sample through the real compression pipeline (shared with
+    /// `CompressionViewModel` via `CompressionPipeline`) and returns
     /// `compressed / original` as a `Double` ratio.
     private func compressSample(
         _ file: ImageFile,
         settings: CompressionSettings
     ) async -> Double? {
         let outputFormat = settings.outputFormat.resolve(for: file.format)
-        let quality = settings.quality
-        let resolutionPercent = settings.resolutionPercent
 
         // Bail early if the compressor this sample needs isn't installed.
         if ToolChecker.missingTools(for: [outputFormat]) != nil {
             return nil
         }
 
-        let resize: (Int, Int)?
-        if resolutionPercent < 100 {
-            resize = file.resizedDimensions(percent: resolutionPercent)
-        } else {
-            resize = nil
-        }
-
-        let tempDir = FileManager.default.temporaryDirectory
-        let tempOutput = tempDir
-            .appendingPathComponent("crunch-estimate-\(UUID().uuidString).\(outputFormat.fileExtension)")
-
-        // Single cleanup site for both the output temp and any resize temp.
-        var resizedTemp: URL?
-        defer {
-            try? FileManager.default.removeItem(at: tempOutput)
-            if let resizedTemp { try? FileManager.default.removeItem(at: resizedTemp) }
-        }
+        guard file.originalSize > 0 else { return nil }
 
         do {
-            // WebP uses cwebp's built-in resize; every other format routes
-            // through ImageResizer. Mirrors the logic in
-            // CompressionViewModel.compressSingleFile so ratios stay honest.
-            let needsManualResize = resize != nil && outputFormat != .webp
-            let compressionInput: URL
-            if needsManualResize, let resize {
-                let resized = try await ImageResizer.resize(
-                    input: file.url,
-                    width: resize.0,
-                    height: resize.1
-                )
-                resizedTemp = resized
-                compressionInput = resized
-            } else {
-                compressionInput = file.url
-            }
-
-            switch outputFormat {
-            case .png:
-                try await PNGCompressor.compress(
-                    input: compressionInput,
-                    output: tempOutput,
-                    quality: quality
-                )
-            case .jpeg:
-                try await JPEGCompressor.compress(
-                    input: compressionInput,
-                    output: tempOutput,
-                    quality: quality
-                )
-            case .webp:
-                try await WebPCompressor.compress(
-                    input: compressionInput,
-                    output: tempOutput,
-                    quality: quality,
-                    resize: resize
-                )
-            }
-
-            let compressedSize = (try? tempOutput.resourceValues(forKeys: [.fileSizeKey]).fileSize)
-                .flatMap { Int64($0) } ?? 0
-
-            guard file.originalSize > 0 else { return nil }
-            return Double(compressedSize) / Double(file.originalSize)
+            let output = try await CompressionPipeline.run(file: file, settings: settings)
+            defer { try? FileManager.default.removeItem(at: output.url) }
+            return Double(output.bytes) / Double(file.originalSize)
         } catch {
             return nil
         }
