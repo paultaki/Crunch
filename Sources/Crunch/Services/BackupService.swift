@@ -17,7 +17,19 @@ enum BackupError: LocalizedError {
 enum BackupService {
     static let backupFolderName = "Uncompressed Backup"
 
-    static func backupFiles(_ urls: [URL]) throws {
+    /// Copies `urls` into a per-directory `Uncompressed Backup` folder.
+    ///
+    /// The actual FileManager work runs in a detached task so a large batch
+    /// of files doesn't block the main actor — callers should already have
+    /// moved to `.compressing` state before awaiting this so the UI shows
+    /// progress feedback immediately rather than appearing to hang.
+    static func backupFiles(_ urls: [URL]) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            try backupFilesSync(urls)
+        }.value
+    }
+
+    private static func backupFilesSync(_ urls: [URL]) throws {
         let fm = FileManager.default
 
         // Group files by parent directory

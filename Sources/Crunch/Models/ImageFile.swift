@@ -11,13 +11,34 @@ import ImageIO
 /// and can be constructed on a background task before hand-off to the main
 /// actor.
 struct ImageFile: Identifiable, Sendable {
-    let id = UUID()
+    let id: UUID
     let url: URL
     let originalSize: Int64
     let format: ImageFormat
     let thumbnail: CGImage
     let pixelWidth: Int
     let pixelHeight: Int
+
+    /// `id` defaults to a fresh UUID; callers reloading an existing file's
+    /// metadata (see `load(from:id:)`) pass the original id through so
+    /// SwiftUI list identity survives the reload.
+    init(
+        id: UUID = UUID(),
+        url: URL,
+        originalSize: Int64,
+        format: ImageFormat,
+        thumbnail: CGImage,
+        pixelWidth: Int,
+        pixelHeight: Int
+    ) {
+        self.id = id
+        self.url = url
+        self.originalSize = originalSize
+        self.format = format
+        self.thumbnail = thumbnail
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+    }
 
     var filename: String { url.lastPathComponent }
 
@@ -31,8 +52,10 @@ struct ImageFile: Identifiable, Sendable {
 
     /// Loads an image from disk using `ImageIO` so we never fully decode the
     /// source — we only ask for a thumbnail of a fixed max pixel size.
-    /// Callable from any thread.
-    static func load(from url: URL) -> ImageFile? {
+    /// Callable from any thread. Pass `id` when reloading an existing
+    /// file's metadata (e.g. after a cancelled compression run) so the
+    /// returned value keeps the same identity.
+    static func load(from url: URL, id: UUID = UUID()) -> ImageFile? {
         guard let format = ImageFormat.from(extension: url.pathExtension) else {
             return nil
         }
@@ -63,6 +86,7 @@ struct ImageFile: Identifiable, Sendable {
         }
 
         return ImageFile(
+            id: id,
             url: url,
             originalSize: fileSize,
             format: format,

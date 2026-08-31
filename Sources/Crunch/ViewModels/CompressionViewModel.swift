@@ -178,43 +178,79 @@ final class CompressionViewModel {
             return
         }
 
-        // Backup originals
+        // Backup originals. State is already `.compressing` (completed: 0)
+        // so the UI shows progress feedback immediately; the copy itself
+        // runs off the main actor so a large batch doesn't stall the UI.
         do {
-            try BackupService.backupFiles(files.map(\.url))
+            try await BackupService.backupFiles(files.map(\.url))
         } catch {
             alertMessage = "Backup failed: \(error.localizedDescription)"
             state = .loaded
             return
         }
 
-        // Compress in parallel
+        // Compress with bounded concurrency: an unbounded task group would
+        // spin up one pngquant/cwebp process per file at once, which
+        // thrashes the CPU scheduler on large batches. Cap in-flight tasks
+        // to the core count (minimum 2) and top up the pool as each task
+        // finishes — one child task per file overall, at most N in flight.
+        let maxConcurrency = min(total, max(2, ProcessInfo.processInfo.activeProcessorCount))
         var completedResults: [CompressionResult] = []
         var completed = 0
 
         await withTaskGroup(of: CompressionResult.self) { group in
-            for file in files {
-                group.addTask {
-                    await self.compressSingleFile(file)
-                }
+            var pending = files.makeIterator()
+
+            for _ in 0..<maxConcurrency {
+                guard let file = pending.next() else { break }
+                group.addTask { await self.compressSingleFile(file) }
             }
 
             for await result in group {
                 completedResults.append(result)
                 completed += 1
                 state = .compressing(completed: completed, total: total)
+
+                if let file = pending.next() {
+                    group.addTask { await self.compressSingleFile(file) }
+                }
             }
         }
 
-        // If the user hit Cancel, fall back to the loaded state and leave
-        // existing partial work in place. The backup folder already has the
-        // originals, and successfully compressed files are simply kept.
+        // If the user hit Cancel, reconcile the working set with disk before
+        // falling back to `.loaded`: format conversions already moved their
+        // output to a new URL (the old one is gone), and in-place
+        // compressions changed the file's size out from under us. Without
+        // this, a re-run would back up and report against stale metadata.
         if Task.isCancelled {
+            await reconcileFilesWithDisk()
             state = .loaded
+            requestEstimate()
             return
         }
 
         results = completedResults.sorted { $0.filename < $1.filename }
         state = .results
+    }
+
+    /// Reloads each surviving file's metadata (size, thumbnail) from disk
+    /// and drops entries whose URL no longer exists — the two outcomes a
+    /// compression run cancelled mid-flight can leave behind. Runs off the
+    /// main actor since reloading touches ImageIO. Preserves each file's
+    /// `id` so SwiftUI list identity survives the reconciliation.
+    private func reconcileFilesWithDisk() async {
+        let snapshot = files
+        let reconciled = await Task.detached(priority: .userInitiated) {
+            snapshot.compactMap { file -> ImageFile? in
+                guard FileManager.default.fileExists(atPath: file.url.path) else {
+                    // Format conversion already moved the output and removed
+                    // the source; nothing left to back up or report on.
+                    return nil
+                }
+                return ImageFile.load(from: file.url, id: file.id) ?? file
+            }
+        }.value
+        files = reconciled
     }
 
     private func compressSingleFile(_ file: ImageFile) async -> CompressionResult {
