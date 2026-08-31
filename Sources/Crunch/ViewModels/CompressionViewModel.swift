@@ -24,6 +24,12 @@ final class CompressionViewModel {
     /// notice instead of a silent dash. `nil` once the tool is found or the
     /// format no longer needs it.
     private(set) var estimateMissingToolFormat: ImageFormat?
+    /// Set when the estimate couldn't run because this Mac's ImageIO can't
+    /// encode the resolved format at all (currently only AVIF) — distinct
+    /// from `estimateMissingToolFormat` because there's no install fix to
+    /// suggest, just an explanation. `nil` once the format resolves to
+    /// something encodable.
+    private(set) var estimateUnsupportedFormat: ImageFormat?
 
     private let estimationService = EstimationService()
     private var estimationTask: Task<Void, Never>?
@@ -95,6 +101,7 @@ final class CompressionViewModel {
             state = .empty
             estimatedCompressedSize = nil
             estimateMissingToolFormat = nil
+            estimateUnsupportedFormat = nil
             estimationService.invalidate()
         } else {
             requestEstimate()
@@ -107,6 +114,7 @@ final class CompressionViewModel {
         state = .empty
         estimatedCompressedSize = nil
         estimateMissingToolFormat = nil
+        estimateUnsupportedFormat = nil
         estimationService.invalidate()
         estimationTask?.cancel()
     }
@@ -117,6 +125,7 @@ final class CompressionViewModel {
         state = .empty
         estimatedCompressedSize = nil
         estimateMissingToolFormat = nil
+        estimateUnsupportedFormat = nil
         estimationService.invalidate()
         estimationTask?.cancel()
     }
@@ -130,6 +139,7 @@ final class CompressionViewModel {
         guard !files.isEmpty else {
             estimatedCompressedSize = nil
             estimateMissingToolFormat = nil
+            estimateUnsupportedFormat = nil
             isEstimating = false
             return
         }
@@ -154,12 +164,19 @@ final class CompressionViewModel {
                 case .value(let size):
                     self?.estimatedCompressedSize = size
                     self?.estimateMissingToolFormat = nil
+                    self?.estimateUnsupportedFormat = nil
                 case .toolMissing(let format):
                     self?.estimatedCompressedSize = nil
                     self?.estimateMissingToolFormat = format
+                    self?.estimateUnsupportedFormat = nil
+                case .formatUnsupported(let format):
+                    self?.estimatedCompressedSize = nil
+                    self?.estimateMissingToolFormat = nil
+                    self?.estimateUnsupportedFormat = format
                 case .unavailable, .none:
                     self?.estimatedCompressedSize = nil
                     self?.estimateMissingToolFormat = nil
+                    self?.estimateUnsupportedFormat = nil
                 }
                 self?.isEstimating = false
             }

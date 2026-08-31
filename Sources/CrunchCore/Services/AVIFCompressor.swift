@@ -1,7 +1,6 @@
 import AppKit
 import Foundation
 import ImageIO
-import UniformTypeIdentifiers
 
 /// Encodes AVIF via native ImageIO — no subprocess, unlike PNG (pngquant)
 /// and WebP (cwebp). Mirrors `JPEGCompressor`'s shape exactly; the only

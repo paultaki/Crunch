@@ -18,12 +18,14 @@ public final class EstimationService {
     }
 
     /// Result of an estimate attempt. Distinguishes "the required compressor
-    /// isn't installed" from other bail-out reasons (empty queue, decode
-    /// failure, cancellation) so the UI can show an actionable install
-    /// notice instead of a silent "—".
+    /// isn't installed" and "this format can't be encoded on this Mac at
+    /// all" from other bail-out reasons (empty queue, decode failure,
+    /// cancellation) so the UI can show an actionable notice instead of a
+    /// silent "—".
     public enum Outcome: Equatable, Sendable {
         case value(Int64)
         case toolMissing(ImageFormat)
+        case formatUnsupported(ImageFormat)
         case unavailable
     }
 
@@ -47,6 +49,16 @@ public final class EstimationService {
         guard let sample = Self.pickSample(files) else { return .unavailable }
 
         let outputFormat = settings.outputFormat.resolve(for: sample.format)
+
+        // Checked before the tool-missing branch (and before ever calling
+        // into the pipeline) for the same reason `.toolMissing` is: so the
+        // UI gets a distinct, actionable outcome instead of the sample
+        // compression throwing and collapsing into a bare `.unavailable`
+        // "—". Mirrors AVIFCompressor's own guard, which exists for the
+        // real compress-run path.
+        if outputFormat == .avif, !OutputFormat.avifEncodingSupported {
+            return .formatUnsupported(.avif)
+        }
         if ToolChecker.missingTools(for: [outputFormat]) != nil {
             return .toolMissing(outputFormat)
         }

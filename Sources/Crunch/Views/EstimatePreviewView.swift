@@ -13,6 +13,22 @@ struct EstimatePreviewView: View {
     /// Set when the estimate couldn't run because a required compressor is
     /// missing — shown as an inline install hint instead of a silent "—".
     let missingToolFormat: ImageFormat?
+    /// Set when the estimate couldn't run because this Mac's ImageIO can't
+    /// encode the resolved format at all (currently only AVIF) — shown as
+    /// an inline explanation, same slot as `missingToolFormat`'s hint.
+    let unsupportedFormat: ImageFormat?
+
+    /// The one inline notice to show in place of the size preview, if any.
+    /// Unsupported takes priority — it's the rarer, more specific case.
+    private var inlineNotice: String? {
+        if let unsupportedFormat, let hint = MissingToolsMessage.compactUnsupportedHint(for: unsupportedFormat) {
+            return hint
+        }
+        if let missingToolFormat, let hint = MissingToolsMessage.compactInstallHint(for: missingToolFormat) {
+            return hint
+        }
+        return nil
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
@@ -55,9 +71,8 @@ struct EstimatePreviewView: View {
                 }
             }
 
-            if let missingToolFormat,
-               let hint = MissingToolsMessage.compactInstallHint(for: missingToolFormat) {
-                Text(hint)
+            if let inlineNotice {
+                Text(inlineNotice)
                     .font(.callout)
                     .foregroundStyle(.orange)
             } else {

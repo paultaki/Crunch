@@ -47,7 +47,7 @@ enum CompressionError: LocalizedError {
         case .cannotCreateContext(let name): "Cannot create drawing context for: \(name)"
         case .cannotWriteImage(let name): "Cannot write image: \(name)"
         case .toolMissing(let name): "Required tool not found: \(name)"
-        case .avifNotSupported: "AVIF encoding isn't supported on this Mac"
+        case .avifNotSupported: MissingToolsMessage.avifUnsupported
         }
     }
 }
