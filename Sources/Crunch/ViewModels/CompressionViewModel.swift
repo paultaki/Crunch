@@ -110,6 +110,7 @@ final class CompressionViewModel {
             estimateUnsupportedFormat = nil
             previewPair = nil
             estimationService.invalidate()
+            estimationTask?.cancel()
         } else {
             requestEstimate()
         }
