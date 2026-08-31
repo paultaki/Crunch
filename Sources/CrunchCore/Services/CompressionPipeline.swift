@@ -93,8 +93,14 @@ public enum CompressionPipeline {
             )
         }
 
-        let bytes = try tempOutput.resourceValues(forKeys: [.fileSizeKey]).fileSize
-            .map(Int64.init) ?? 0
+        // A missing size must fail, never default to 0. Zero bytes reads as a
+        // 100%-saved success to every caller, which would defeat the
+        // never-worse guard (`0 >= originalSize` is false) and let a bogus
+        // temp replace the user's file.
+        guard let fileSize = try tempOutput.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+            throw CompressionError.cannotWriteImage(tempOutput.lastPathComponent)
+        }
+        let bytes = Int64(fileSize)
 
         succeeded = true
         return Output(url: tempOutput, bytes: bytes)

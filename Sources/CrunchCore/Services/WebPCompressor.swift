@@ -1,6 +1,13 @@
 import Foundation
 
 enum WebPCompressor {
+    /// Runs cwebp on the input file, writing a WebP to `output`.
+    ///
+    /// cwebp decodes only a short list of formats (PNG, JPEG, TIFF, WebP).
+    /// Anything else — AVIF in practice — is re-encoded to a temporary
+    /// lossless PNG first, same as `PNGCompressor` does for pngquant, and the
+    /// temp is cleaned up before returning. Normalization preserves pixel
+    /// dimensions, so `-resize` still applies correctly to the substitute.
     static func compress(
         input: URL,
         output: URL,
@@ -11,6 +18,17 @@ enum WebPCompressor {
             throw CompressionError.toolMissing("cwebp")
         }
 
+        let needsNormalization = !ImageNormalizer.cwebpDecodableExtensions
+            .contains(input.pathExtension.lowercased())
+        let cwebpInput: URL = try needsNormalization
+            ? ImageNormalizer.encodeAsPNG(from: input)
+            : input
+        defer {
+            if needsNormalization {
+                try? FileManager.default.removeItem(at: cwebpInput)
+            }
+        }
+
         var arguments = ["-q", "\(quality)"]
 
         // cwebp has built-in resize support
@@ -18,7 +36,7 @@ enum WebPCompressor {
             arguments += ["-resize", "\(resize.0)", "\(resize.1)"]
         }
 
-        arguments += ["-o", output.path, input.path]
+        arguments += ["-o", output.path, cwebpInput.path]
 
         let result = try await ShellRunner.run(
             cwebp,

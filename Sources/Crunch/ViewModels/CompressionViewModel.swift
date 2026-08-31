@@ -95,9 +95,14 @@ final class CompressionViewModel {
     private func appendLoaded(_ loaded: [ImageFile]) {
         guard !loaded.isEmpty else { return }
         files.append(contentsOf: loaded)
-        if !files.isEmpty {
-            state = .loaded
-        }
+
+        // A run in flight compresses the batch it snapshotted at its start,
+        // so these arrivals just queue up for the next run. Leaving state and
+        // the estimate alone keeps the progress UI honest and stops a
+        // re-estimate from fighting the run for pngquant/cwebp.
+        if case .compressing = state { return }
+
+        state = .loaded
         requestEstimate()
     }
 
@@ -117,18 +122,18 @@ final class CompressionViewModel {
     }
 
     func clearAll() {
-        files.removeAll()
-        results.removeAll()
-        state = .empty
-        estimatedCompressedSize = nil
-        estimateMissingToolFormat = nil
-        estimateUnsupportedFormat = nil
-        previewPair = nil
-        estimationService.invalidate()
-        estimationTask?.cancel()
+        clearQueueAndEstimate()
     }
 
     func reset() {
+        clearQueueAndEstimate()
+    }
+
+    /// Empties the queue and tears the estimate down. Cancels the in-flight
+    /// estimation task BEFORE invalidating, so a task that's mid-`estimate()`
+    /// can't repopulate the cache or resurrect a preview temp right after
+    /// we've deleted it (same ordering as `removeFile`).
+    private func clearQueueAndEstimate() {
         files.removeAll()
         results.removeAll()
         state = .empty
@@ -136,14 +141,19 @@ final class CompressionViewModel {
         estimateMissingToolFormat = nil
         estimateUnsupportedFormat = nil
         previewPair = nil
-        estimationService.invalidate()
         estimationTask?.cancel()
+        estimationService.invalidate()
     }
 
     /// Debounced trigger that re-runs sample-based estimation. Safe to call
     /// on every settings or file change — older tasks are cancelled so the
     /// UI only sees the most recent result.
     func requestEstimate() {
+        // A run in flight owns the compressors and is rewriting the very
+        // files an estimate would sample. Leave the displayed estimate
+        // untouched until it finishes; the cancel/finish paths re-request.
+        if case .compressing = state { return }
+
         estimationTask?.cancel()
         // Settings (or the file set) just changed, so whatever preview pair
         // was showing no longer matches — clear it immediately rather than
@@ -213,18 +223,37 @@ final class CompressionViewModel {
     }
 
     func compress() async {
+        // Re-entry would start a second run over the same files while the
+        // first is still rewriting them. The task handle is the
+        // authoritative check because it's assigned synchronously below,
+        // before any suspension point — `state` only flips to `.compressing`
+        // once `runCompression`'s body starts, which a second tap can beat.
+        guard compressionTask == nil else { return }
+        if case .compressing = state { return }
+
         // Don't fight the real run for CPU or pngquant/cwebp processes.
         estimationTask?.cancel()
-        compressionTask = Task { await runCompression() }
-        await compressionTask?.value
+        let task = Task { await runCompression() }
+        compressionTask = task
+        await task.value
+        compressionTask = nil
     }
 
     private func runCompression() async {
-        let total = files.count
+        // One snapshot drives the whole run: the tool check, the backup, the
+        // progress total, the destination plan, and the work queue. Reading
+        // the live `files` array after an await would let a drop that landed
+        // mid-backup get compressed with no backup behind it. Files added
+        // during a run stay queued for the next one.
+        let batch = files
+        // Settings are snapshotted alongside the files: a slider moved
+        // mid-run must not change what half the batch compresses to.
+        let runSettings = settings
+        let total = batch.count
         state = .compressing(completed: 0, total: total)
 
         // Check which tools are needed
-        let neededFormats = Set(files.map { settings.outputFormat.resolve(for: $0.format) })
+        let neededFormats = Set(batch.map { runSettings.outputFormat.resolve(for: $0.format) })
         if let missing = ToolChecker.missingTools(for: neededFormats) {
             alertMessage = missing
             state = .loaded
@@ -235,12 +264,26 @@ final class CompressionViewModel {
         // so the UI shows progress feedback immediately; the copy itself
         // runs off the main actor so a large batch doesn't stall the UI.
         do {
-            try await BackupService.backupFiles(files.map(\.url))
+            try await BackupService.backupFiles(batch.map(\.url))
         } catch {
             alertMessage = "Backup failed: \(error.localizedDescription)"
             state = .loaded
             return
         }
+
+        // Assign every output path serially, before any task spawns, so two
+        // conversions can't land on one name and no conversion can clobber an
+        // un-backed-up bystander. See `OutputDestinationPlanner`.
+        let destinations = OutputDestinationPlanner.plan(
+            batch.map {
+                OutputDestinationPlanner.Request(
+                    source: $0.url,
+                    sourceFormat: $0.format,
+                    outputFormat: runSettings.outputFormat.resolve(for: $0.format)
+                )
+            }
+        )
+        let work = Array(zip(batch, destinations))
 
         // Compress with bounded concurrency: an unbounded task group would
         // spin up one pngquant/cwebp process per file at once, which
@@ -252,11 +295,17 @@ final class CompressionViewModel {
         var completed = 0
 
         await withTaskGroup(of: CompressionResult.self) { group in
-            var pending = files.makeIterator()
+            var pending = work.makeIterator()
 
             for _ in 0..<maxConcurrency {
-                guard !Task.isCancelled, let file = pending.next() else { break }
-                group.addTask { await self.compressSingleFile(file) }
+                guard !Task.isCancelled, let next = pending.next() else { break }
+                group.addTask {
+                    await CompressionJob.run(
+                        file: next.0,
+                        settings: runSettings,
+                        destination: next.1
+                    )
+                }
             }
 
             for await result in group {
@@ -269,8 +318,14 @@ final class CompressionViewModel {
                 // `addTask` (which doesn't itself check cancellation) keeps
                 // topping up the window and Cancel never actually stops
                 // new files from starting.
-                if !Task.isCancelled, let file = pending.next() {
-                    group.addTask { await self.compressSingleFile(file) }
+                if !Task.isCancelled, let next = pending.next() {
+                    group.addTask {
+                        await CompressionJob.run(
+                            file: next.0,
+                            settings: runSettings,
+                            destination: next.1
+                        )
+                    }
                 }
             }
         }
@@ -283,6 +338,11 @@ final class CompressionViewModel {
         if Task.isCancelled {
             await reconcileFilesWithDisk()
             state = .loaded
+            // Every cached ratio and the kept preview temp describe files
+            // that just changed on disk, so they'd extrapolate phantom
+            // savings off already-compressed bytes. Drop them, then
+            // re-estimate from scratch.
+            estimationService.invalidate()
             requestEstimate()
             return
         }
@@ -309,73 +369,5 @@ final class CompressionViewModel {
             }
         }.value
         files = reconciled
-    }
-
-    private func compressSingleFile(_ file: ImageFile) async -> CompressionResult {
-        let outputFormat = settings.outputFormat.resolve(for: file.format)
-        let isConversion = outputFormat != file.format
-
-        do {
-            let output = try await CompressionPipeline.run(file: file, settings: settings)
-
-            // Never make a file worse: if compression didn't actually shrink
-            // it (same format, output >= what's already on disk), leave the
-            // original untouched and report "already optimized" instead of
-            // replacing it with a same-or-larger file. Format conversions
-            // are exempt — the user explicitly asked for a different format
-            // (e.g. png → webp), so that result is always delivered even if
-            // it happens to be larger.
-            if !isConversion, output.bytes >= file.originalSize {
-                try? FileManager.default.removeItem(at: output.url)
-                return CompressionResult(
-                    filename: file.filename,
-                    originalSize: file.originalSize,
-                    compressedSize: file.originalSize,
-                    error: nil,
-                    wasSkipped: true,
-                    outputURL: file.url
-                )
-            }
-
-            // Determine output path
-            let outputURL: URL
-            if outputFormat == file.format {
-                outputURL = file.url
-            } else {
-                // New extension, same directory
-                outputURL = file.url.deletingPathExtension()
-                    .appendingPathExtension(outputFormat.fileExtension)
-            }
-
-            // Move temp to final location
-            if FileManager.default.fileExists(atPath: outputURL.path) {
-                _ = try FileManager.default.replaceItemAt(outputURL, withItemAt: output.url)
-            } else {
-                try FileManager.default.moveItem(at: output.url, to: outputURL)
-            }
-
-            // If the output landed at a different path than the source (format
-            // conversion, e.g. photo.jpg → photo.webp), the original still sits
-            // in the main folder. The backup copy in `Uncompressed Backup` is
-            // already on disk, so it's safe to remove the source now.
-            if outputURL.standardizedFileURL != file.url.standardizedFileURL {
-                try? FileManager.default.removeItem(at: file.url)
-            }
-
-            return CompressionResult(
-                filename: outputURL.lastPathComponent,
-                originalSize: file.originalSize,
-                compressedSize: output.bytes,
-                error: nil,
-                outputURL: outputURL
-            )
-        } catch {
-            return CompressionResult(
-                filename: file.filename,
-                originalSize: file.originalSize,
-                compressedSize: nil,
-                error: error.localizedDescription
-            )
-        }
     }
 }

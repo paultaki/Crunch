@@ -94,6 +94,40 @@ struct CompressionPipelineTests {
         #expect(FileManager.default.fileExists(atPath: output.url.path))
     }
 
+    // AVIF is the one source format cwebp cannot decode, so this pins the
+    // normalize-to-PNG hop in WebPCompressor. Needs both an AVIF encoder (to
+    // build the fixture) and cwebp.
+    @Test(
+        "AVIF source converts to WebP by normalizing through PNG first",
+        .enabled(if: OutputFormat.avifEncodingSupported && ToolChecker.cwebpPath != nil)
+    )
+    func avifSourceConvertsToWebP() async throws {
+        let pngURL = try TestImageFactory.makeSolidPNG(width: 64, height: 64)
+        defer { try? FileManager.default.removeItem(at: pngURL) }
+
+        let pngFile = try #require(ImageFile.load(from: pngURL))
+        let avif = try await CompressionPipeline.run(
+            file: pngFile,
+            settings: CompressionSettings(outputFormat: .avif, resolutionPercent: 100, quality: 80)
+        )
+        defer { try? FileManager.default.removeItem(at: avif.url) }
+
+        let avifFile = try #require(ImageFile.load(from: avif.url))
+        #expect(avifFile.format == .avif)
+
+        let webp = try await CompressionPipeline.run(
+            file: avifFile,
+            settings: CompressionSettings(outputFormat: .webp, resolutionPercent: 100, quality: 80)
+        )
+        defer { try? FileManager.default.removeItem(at: webp.url) }
+
+        #expect(webp.bytes > 0)
+        let reloaded = try #require(ImageFile.load(from: webp.url))
+        #expect(reloaded.format == .webp)
+        #expect(reloaded.pixelWidth == 64)
+        #expect(reloaded.pixelHeight == 64)
+    }
+
     // cwebp may not be installed in every environment; skip rather than fail
     // when it isn't.
     @Test(

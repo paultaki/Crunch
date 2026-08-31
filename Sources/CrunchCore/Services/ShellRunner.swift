@@ -22,9 +22,16 @@ enum ShellError: LocalizedError {
 
 /// Runs a subprocess off the main thread and honors structured-concurrency
 /// cancellation by terminating the underlying `Process`.
+///
+/// Cancellation is scoped to a single `run(_:arguments:)` invocation: each
+/// call owns a private `ProcessBox` and can only ever terminate its own
+/// child. A shared registry would mean cancelling one estimate kills the
+/// pngquant/cwebp processes of an unrelated compression run.
 enum ShellRunner {
     static func run(_ executable: String, arguments: [String]) async throws -> ShellResult {
-        try await withTaskCancellationHandler {
+        let box = ProcessBox()
+
+        return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
                     let process = Process()
@@ -36,22 +43,33 @@ enum ShellRunner {
                     process.standardOutput = stdoutPipe
                     process.standardError = stderrPipe
 
-                    Self.currentProcessLock.lock()
-                    Self.currentProcesses.insert(process)
-                    Self.currentProcessLock.unlock()
-
-                    defer {
-                        Self.currentProcessLock.lock()
-                        Self.currentProcesses.remove(process)
-                        Self.currentProcessLock.unlock()
-                    }
-
                     do {
-                        try process.run()
-                        process.waitUntilExit()
+                        // The box launches under its own lock so a cancel
+                        // racing this line either happens first (nothing
+                        // starts) or after (the child is registered and
+                        // killable) — never in between, which would leave an
+                        // orphan no one holds a handle to.
+                        guard try box.start(process) else {
+                            continuation.resume(throwing: ShellError.cancelled)
+                            return
+                        }
+
+                        // Drain both pipes to EOF BEFORE waiting on exit. A
+                        // child that writes more than the 64KB pipe buffer
+                        // blocks forever otherwise, and this process would
+                        // block forever waiting for it.
+                        let stderrBuffer = DataBox()
+                        let stderrDrained = DispatchGroup()
+                        stderrDrained.enter()
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            stderrBuffer.value = stderrPipe.fileHandleForReading
+                                .readDataToEndOfFile()
+                            stderrDrained.leave()
+                        }
 
                         let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                        stderrDrained.wait()
+                        process.waitUntilExit()
 
                         if process.terminationReason == .uncaughtSignal
                             && process.terminationStatus == SIGTERM {
@@ -62,7 +80,7 @@ enum ShellRunner {
                         let result = ShellResult(
                             exitCode: process.terminationStatus,
                             stdout: String(data: stdoutData, encoding: .utf8) ?? "",
-                            stderr: String(data: stderrData, encoding: .utf8) ?? ""
+                            stderr: String(data: stderrBuffer.value, encoding: .utf8) ?? ""
                         )
                         continuation.resume(returning: result)
                     } catch {
@@ -71,20 +89,66 @@ enum ShellRunner {
                 }
             }
         } onCancel: {
-            // Terminate every process started by this runner. Ongoing Tasks
-            // will see their process exit with SIGTERM and propagate the
-            // `.cancelled` error up to the caller.
-            Self.currentProcessLock.lock()
-            let active = Self.currentProcesses
-            Self.currentProcessLock.unlock()
-            for process in active where process.isRunning {
-                process.terminate()
+            box.cancel()
+        }
+    }
+
+    // MARK: - Per-invocation process ownership
+
+    /// Holds the one `Process` a single `run` call spawned, plus whether that
+    /// call was cancelled. `@unchecked Sendable` because the lock, not the
+    /// compiler, provides the exclusion.
+    private final class ProcessBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var process: Process?
+        private var isCancelled = false
+
+        /// Launches `process` and takes ownership of it, or returns `false`
+        /// when this invocation was already cancelled (caller should resume
+        /// with `ShellError.cancelled` and start nothing).
+        func start(_ process: Process) throws -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !isCancelled else { return false }
+            try process.run()
+            self.process = process
+            return true
+        }
+
+        /// Marks this invocation cancelled and SIGTERMs its child if one is
+        /// already running. `terminate()` runs outside the lock; it never
+        /// calls back into the box, and holding the lock across it would
+        /// serialize against an in-flight `start`.
+        func cancel() {
+            lock.lock()
+            isCancelled = true
+            let running = process
+            lock.unlock()
+
+            if let running, running.isRunning {
+                running.terminate()
             }
         }
     }
 
-    // MARK: - Process tracking
+    /// Minimal thread-safe box so the stderr drain, which runs on its own
+    /// queue, can hand its bytes back to the waiting caller without tripping
+    /// Swift 6 sendability on a captured `var`.
+    private final class DataBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage = Data()
 
-    private static let currentProcessLock = NSLock()
-    nonisolated(unsafe) private static var currentProcesses: Set<Process> = []
+        var value: Data {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return storage
+            }
+            set {
+                lock.lock()
+                storage = newValue
+                lock.unlock()
+            }
+        }
+    }
 }
