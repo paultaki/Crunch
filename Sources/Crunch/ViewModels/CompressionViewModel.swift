@@ -299,7 +299,8 @@ final class CompressionViewModel {
                     originalSize: file.originalSize,
                     compressedSize: file.originalSize,
                     error: nil,
-                    wasSkipped: true
+                    wasSkipped: true,
+                    outputURL: file.url
                 )
             }
 
@@ -332,7 +333,8 @@ final class CompressionViewModel {
                 filename: outputURL.lastPathComponent,
                 originalSize: file.originalSize,
                 compressedSize: output.bytes,
-                error: nil
+                error: nil,
+                outputURL: outputURL
             )
         } catch {
             return CompressionResult(

@@ -10,19 +10,25 @@ public struct CompressionResult: Identifiable, Sendable {
     /// format) and the pipeline left the original in place instead of
     /// replacing it. `compressedSize` equals `originalSize` in this case.
     public var wasSkipped: Bool = false
+    /// The file's final location on disk: the compressed/converted output,
+    /// or the untouched original when `wasSkipped` is true. `nil` when
+    /// compression failed and there's nothing on disk to reveal or drag.
+    public let outputURL: URL?
 
     public init(
         filename: String,
         originalSize: Int64,
         compressedSize: Int64?,
         error: String?,
-        wasSkipped: Bool = false
+        wasSkipped: Bool = false,
+        outputURL: URL? = nil
     ) {
         self.filename = filename
         self.originalSize = originalSize
         self.compressedSize = compressedSize
         self.error = error
         self.wasSkipped = wasSkipped
+        self.outputURL = outputURL
     }
 
     public var succeeded: Bool { compressedSize != nil }

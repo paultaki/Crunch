@@ -1,3 +1,4 @@
+import AppKit
 import CrunchCore
 import SwiftUI
 
@@ -58,6 +59,19 @@ struct ResultRowView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
+
+            if let outputURL = result.outputURL {
+                Button {
+                    revealInFinder(outputURL)
+                } label: {
+                    Image(systemName: "arrow.right.circle")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .opacity(isHovering ? 1 : 0)
+                .help("Reveal in Finder")
+            }
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 18)
@@ -69,6 +83,20 @@ struct ResultRowView: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) { isHovering = hovering }
         }
+        .modifier(DraggableResultModifier(outputURL: result.outputURL))
+        .contextMenu {
+            if let outputURL = result.outputURL {
+                Button {
+                    revealInFinder(outputURL)
+                } label: {
+                    Label("Reveal in Finder", systemImage: "arrow.right.circle")
+                }
+            }
+        }
+    }
+
+    private func revealInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     /// Reduction badge. `reduction` is negative when a format conversion
@@ -91,6 +119,21 @@ struct ResultRowView: View {
                 .foregroundStyle(.orange)
                 .frame(width: 52, alignment: .trailing)
                 .monospacedDigit()
+        }
+    }
+}
+
+/// Makes a row draggable to Finder/Slack/Mail as its output file when one
+/// exists; a no-op for failed results (`outputURL == nil`). Kept as a
+/// separate `ViewModifier` since `.draggable` has no built-in optional form.
+private struct DraggableResultModifier: ViewModifier {
+    let outputURL: URL?
+
+    func body(content: Content) -> some View {
+        if let outputURL {
+            content.draggable(outputURL)
+        } else {
+            content
         }
     }
 }
