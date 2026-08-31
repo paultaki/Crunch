@@ -7,11 +7,17 @@ import UniformTypeIdentifiers
 /// and WebP (cwebp). Mirrors `JPEGCompressor`'s shape exactly; the only
 /// difference is the destination UTI.
 ///
-/// Callers must check `OutputFormat.avifEncodingSupported` before routing
-/// here — `CGImageDestinationCreateWithURL` fails outright on a system
-/// whose ImageIO can't encode AVIF, and this type has no fallback for that.
+/// The UI only offers AVIF when `OutputFormat.avifEncodingSupported` is
+/// true (see `ControlsView`), but a file's *resolved* format can still land
+/// here unpicked — e.g. `.same` resolving an AVIF-format drop on a machine
+/// that can decode but not encode AVIF. Guarding here, rather than only at
+/// the picker, keeps that path a clear error instead of a raw ImageIO nil.
 enum AVIFCompressor {
     static func compress(input: URL, output: URL, quality: Int) async throws {
+        guard OutputFormat.avifEncodingSupported else {
+            throw CompressionError.avifNotSupported
+        }
+
         let qualityFloat = Double(quality) / 100.0
 
         guard let imageSource = CGImageSourceCreateWithURL(input as CFURL, nil),

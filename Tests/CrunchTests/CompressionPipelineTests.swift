@@ -26,7 +26,14 @@ struct CompressionPipelineTests {
         #expect(CGImageSourceCreateImageAtIndex(source, 0, nil) != nil)
     }
 
-    @Test("AVIF output path compresses end-to-end via native ImageIO")
+    // AVIF encode support varies by OS/hardware even within the macOS 15
+    // deployment target (see OutputFormat.avifEncodingSupported); skip
+    // rather than fail when this machine's ImageIO doesn't have it, same as
+    // the pngquant/cwebp tests below.
+    @Test(
+        "AVIF output path compresses end-to-end via native ImageIO",
+        .enabled(if: OutputFormat.avifEncodingSupported)
+    )
     func avifPathEndToEnd() async throws {
         let sourceURL = try TestImageFactory.makeSolidPNG(width: 64, height: 64)
         defer { try? FileManager.default.removeItem(at: sourceURL) }
@@ -47,7 +54,10 @@ struct CompressionPipelineTests {
         #expect(CGImageSourceCreateImageAtIndex(source, 0, nil) != nil)
     }
 
-    @Test("AVIF output is readable back as an ImageFile — decode support, not just encode")
+    @Test(
+        "AVIF output is readable back as an ImageFile — decode support, not just encode",
+        .enabled(if: OutputFormat.avifEncodingSupported)
+    )
     func avifOutputIsReadableAsImageFile() async throws {
         let sourceURL = try TestImageFactory.makeSolidPNG(width: 64, height: 64)
         defer { try? FileManager.default.removeItem(at: sourceURL) }
