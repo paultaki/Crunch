@@ -8,7 +8,7 @@ struct ControlsView: View {
         VStack(spacing: 18) {
             controlBlock(title: "Output Format") {
                 Picker("Format", selection: $settings.outputFormat) {
-                    ForEach(OutputFormat.allCases, id: \.self) { format in
+                    ForEach(OutputFormat.availableCases, id: \.self) { format in
                         Text(format.rawValue).tag(format)
                     }
                 }

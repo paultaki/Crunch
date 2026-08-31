@@ -13,7 +13,7 @@ struct DropZoneView: View {
 
     @State private var isTargeted = false
 
-    private static let validExtensions: Set<String> = ["png", "jpg", "jpeg", "webp"]
+    private static let validExtensions: Set<String> = ["png", "jpg", "jpeg", "webp", "avif"]
 
     var body: some View {
         Group {
@@ -45,7 +45,7 @@ struct DropZoneView: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(.primary)
 
-                Text("PNG, JPEG, WebP — or a folder of them")
+                Text("PNG, JPEG, WebP, AVIF — or a folder of them")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

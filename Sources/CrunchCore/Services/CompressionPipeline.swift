@@ -85,6 +85,12 @@ public enum CompressionPipeline {
                 quality: quality,
                 resize: resize
             )
+        case .avif:
+            try await AVIFCompressor.compress(
+                input: compressionInput,
+                output: tempOutput,
+                quality: quality
+            )
         }
 
         let bytes = try tempOutput.resourceValues(forKeys: [.fileSizeKey]).fileSize

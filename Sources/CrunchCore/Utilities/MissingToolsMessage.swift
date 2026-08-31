@@ -15,6 +15,7 @@ public enum MissingToolsMessage {
         case .png: "Install pngquant for PNG estimates"
         case .webp: "Install cwebp for WebP estimates"
         case .jpeg: nil // JPEG compression uses ImageIO, no external tool
+        case .avif: nil // AVIF compression uses ImageIO, no external tool
         }
     }
 }
