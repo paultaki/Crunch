@@ -124,14 +124,22 @@ struct ResultRowView: View {
 }
 
 /// Makes a row draggable to Finder/Slack/Mail as its output file when one
-/// exists; a no-op for failed results (`outputURL == nil`). Kept as a
-/// separate `ViewModifier` since `.draggable` has no built-in optional form.
+/// exists; a no-op for failed results (`outputURL == nil`).
+///
+/// Deliberately `NSItemProvider(contentsOf:)` rather than `.draggable(url)`:
+/// `.draggable` on a bare `URL` uses its default `Transferable` conformance,
+/// which many drop targets (Finder included) read as a text/URL reference
+/// rather than a file copy. `NSItemProvider(contentsOf:)` is the AppKit
+/// bridge that registers an actual file representation, so dropping on
+/// Finder/Slack/Mail copies the file, not a link to it.
 private struct DraggableResultModifier: ViewModifier {
     let outputURL: URL?
 
     func body(content: Content) -> some View {
         if let outputURL {
-            content.draggable(outputURL)
+            content.onDrag {
+                NSItemProvider(contentsOf: outputURL) ?? NSItemProvider()
+            }
         } else {
             content
         }

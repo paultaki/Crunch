@@ -15,15 +15,18 @@ struct ResultsView: View {
     /// Re-checked on every render (cheap `FileManager` stat) rather than
     /// cached, so the button only shows when a backup genuinely exists on
     /// disk right now — not a stale guess from when results were produced.
+    /// Derived from `containingFolder` (not an independent scan of every
+    /// result's parent dir) so the two footer buttons always agree on which
+    /// folder they're pointing at, even for a batch spanning multiple
+    /// source directories.
     private var backupFolder: URL? {
-        let parentDirs = Set(results.compactMap { $0.outputURL?.deletingLastPathComponent() })
-        return parentDirs
-            .map { $0.appendingPathComponent(BackupService.backupFolderName) }
-            .first { url in
-                var isDirectory: ObjCBool = false
-                return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-                    && isDirectory.boolValue
-            }
+        guard let containingFolder else { return nil }
+        let candidate = containingFolder.appendingPathComponent(BackupService.backupFolderName)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else { return nil }
+        return candidate
     }
 
     var body: some View {
