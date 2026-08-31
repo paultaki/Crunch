@@ -76,9 +76,17 @@ PLIST
 
 echo "==> Generating app icon"
 rm -rf "$ICONSET_DIR"
+GENERATED_ICONSET="/tmp/Crunch.iconset"
+rm -rf "$GENERATED_ICONSET"
 swift "$ROOT_DIR/icon_generator.swift"
+
+if [ ! -d "$GENERATED_ICONSET" ] || [ -z "$(find "$GENERATED_ICONSET" -maxdepth 1 -name '*.png' -print -quit)" ]; then
+    echo "error: icon_generator.swift did not produce any PNGs in $GENERATED_ICONSET" >&2
+    exit 1
+fi
+
 mkdir -p "$ICONSET_DIR"
-cp /tmp/Crunch.iconset/*.png "$ICONSET_DIR/"
+cp "$GENERATED_ICONSET"/*.png "$ICONSET_DIR/"
 iconutil -c icns "$ICONSET_DIR" -o "$ICNS_PATH"
 rm -rf "$ICONSET_DIR"
 
