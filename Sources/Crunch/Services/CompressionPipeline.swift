@@ -87,8 +87,8 @@ enum CompressionPipeline {
             )
         }
 
-        let bytes = (try? tempOutput.resourceValues(forKeys: [.fileSizeKey]).fileSize)
-            .flatMap { Int64($0) } ?? 0
+        let bytes = try tempOutput.resourceValues(forKeys: [.fileSizeKey]).fileSize
+            .map(Int64.init) ?? 0
 
         succeeded = true
         return Output(url: tempOutput, bytes: bytes)
