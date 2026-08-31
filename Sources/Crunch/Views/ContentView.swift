@@ -90,7 +90,8 @@ struct ContentView: View {
                 reduction: viewModel.estimatedReduction,
                 isEstimating: viewModel.isEstimating,
                 missingToolFormat: viewModel.estimateMissingToolFormat,
-                unsupportedFormat: viewModel.estimateUnsupportedFormat
+                unsupportedFormat: viewModel.estimateUnsupportedFormat,
+                previewPair: viewModel.previewPair
             )
             .animation(
                 .spring(response: 0.45, dampingFraction: 0.85),

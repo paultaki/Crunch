@@ -30,6 +30,12 @@ final class CompressionViewModel {
     /// suggest, just an explanation. `nil` once the format resolves to
     /// something encodable.
     private(set) var estimateUnsupportedFormat: ImageFormat?
+    /// Original/compressed sample URLs for the before/after preview sheet,
+    /// or `nil` whenever there's nothing to show — estimating, no sample,
+    /// or the estimate outcome wasn't a `.value`. Mirrors
+    /// `EstimationService.previewPair`; see that property's doc comment for
+    /// the cache-hit edge case where it can go briefly nil.
+    private(set) var previewPair: (original: URL, compressed: URL)?
 
     private let estimationService = EstimationService()
     private var estimationTask: Task<Void, Never>?
@@ -102,6 +108,7 @@ final class CompressionViewModel {
             estimatedCompressedSize = nil
             estimateMissingToolFormat = nil
             estimateUnsupportedFormat = nil
+            previewPair = nil
             estimationService.invalidate()
         } else {
             requestEstimate()
@@ -115,6 +122,7 @@ final class CompressionViewModel {
         estimatedCompressedSize = nil
         estimateMissingToolFormat = nil
         estimateUnsupportedFormat = nil
+        previewPair = nil
         estimationService.invalidate()
         estimationTask?.cancel()
     }
@@ -126,6 +134,7 @@ final class CompressionViewModel {
         estimatedCompressedSize = nil
         estimateMissingToolFormat = nil
         estimateUnsupportedFormat = nil
+        previewPair = nil
         estimationService.invalidate()
         estimationTask?.cancel()
     }
@@ -135,6 +144,11 @@ final class CompressionViewModel {
     /// UI only sees the most recent result.
     func requestEstimate() {
         estimationTask?.cancel()
+        // Settings (or the file set) just changed, so whatever preview pair
+        // was showing no longer matches — clear it immediately rather than
+        // waiting for the debounced re-estimate, same as the size/percent
+        // fields below.
+        previewPair = nil
 
         guard !files.isEmpty else {
             estimatedCompressedSize = nil
@@ -165,6 +179,7 @@ final class CompressionViewModel {
                     self?.estimatedCompressedSize = size
                     self?.estimateMissingToolFormat = nil
                     self?.estimateUnsupportedFormat = nil
+                    self?.previewPair = self?.estimationService.previewPair
                 case .toolMissing(let format):
                     self?.estimatedCompressedSize = nil
                     self?.estimateMissingToolFormat = format

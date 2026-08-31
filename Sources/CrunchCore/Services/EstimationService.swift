@@ -34,6 +34,30 @@ public final class EstimationService {
     /// with eviction — wiggling the slider is instant.
     private var ratioCache: [Key: Double] = [:]
 
+    /// The compressed sample temp file kept alive for the before/after
+    /// preview, paired with the settings `Key` it was produced under.
+    /// Replaced — deleting the previous compressed temp — every time a NEW
+    /// sample compression actually runs (a `ratioCache` *miss*). A cache
+    /// *hit* reuses the cached ratio without recompressing, so it leaves
+    /// this untouched; see `previewPair` below for what that means for the
+    /// preview button when settings are dialed back to an older value.
+    private var keptSample: (key: Key, compressedURL: URL)?
+
+    /// Original/compressed URL pair for the sample behind the most recent
+    /// `estimate()` call's result, or `nil` if no matching compressed temp
+    /// is currently on disk — e.g. estimation is still running, the sample
+    /// is unavailable, or (rare) the caller re-requested settings whose
+    /// ratio was cache-hit from an earlier run whose temp has since been
+    /// evicted by a newer sample compression.
+    ///
+    /// That last case is deliberately NOT backfilled by recompressing: the
+    /// ratio cache exists precisely so revisiting old settings is free, and
+    /// spending a full sample compression just to keep the Preview button
+    /// visible would defeat that. Simplest correct behavior: the button
+    /// hides for that one settings value until it's the most recent
+    /// compression again (e.g. the user nudges the slider back).
+    public private(set) var previewPair: (original: URL, compressed: URL)?
+
     public init() {}
 
     /// Returns an estimate of the total compressed byte size for `files`
@@ -45,6 +69,12 @@ public final class EstimationService {
         files: [ImageFile],
         settings: CompressionSettings
     ) async -> Outcome {
+        // Cleared up front and only re-set on a successful `.value` result
+        // below — every early-return path (empty queue, no sample, missing
+        // tool, unsupported format, decode failure) means "no preview to
+        // show right now".
+        previewPair = nil
+
         guard !files.isEmpty else { return .unavailable }
         guard let sample = Self.pickSample(files) else { return .unavailable }
 
@@ -74,10 +104,14 @@ public final class EstimationService {
         if let cached = ratioCache[key] {
             ratio = cached
         } else {
-            guard let measured = await compressSample(sample, settings: settings)
+            guard let measured = await compressSample(sample, settings: settings, key: key)
             else { return .unavailable }
             ratioCache[key] = measured
             ratio = measured
+        }
+
+        if let keptSample, keptSample.key == key {
+            previewPair = (original: sample.url, compressed: keptSample.compressedURL)
         }
 
         let totalOriginal = files.reduce(Int64(0)) { $0 + $1.originalSize }
@@ -94,10 +128,15 @@ public final class EstimationService {
 
     /// Runs the sample through the real compression pipeline (shared with
     /// `CompressionViewModel` via `CompressionPipeline`) and returns
-    /// `compressed / original` as a `Double` ratio.
+    /// `compressed / original` as a `Double` ratio. Unlike the old
+    /// delete-immediately behavior, the compressed temp is kept alive
+    /// (`keptSample`) for the before/after preview — the previous kept temp
+    /// (if any, under a different key) is deleted first so at most one
+    /// lingers on disk at a time.
     private func compressSample(
         _ file: ImageFile,
-        settings: CompressionSettings
+        settings: CompressionSettings,
+        key: Key
     ) async -> Double? {
         // Tool availability is checked by the caller (`estimate`) before we
         // get here, so it can report `.toolMissing` distinctly.
@@ -105,16 +144,31 @@ public final class EstimationService {
 
         do {
             let output = try await CompressionPipeline.run(file: file, settings: settings)
-            defer { try? FileManager.default.removeItem(at: output.url) }
+            if let previous = keptSample {
+                try? FileManager.default.removeItem(at: previous.compressedURL)
+            }
+            keptSample = (key: key, compressedURL: output.url)
             return Double(output.bytes) / Double(file.originalSize)
         } catch {
             return nil
         }
     }
 
-    /// Called when files are removed from the queue so stale per-file
-    /// entries don't linger. Not required for correctness, just tidy.
+    /// Called when files are removed from the queue, settings invalidate
+    /// the cache, or the batch is cleared/reset, so stale per-file entries
+    /// don't linger — also deletes the kept preview temp, since it no
+    /// longer corresponds to anything the UI can show.
+    ///
+    /// App-exit cleanup: the kept temp lives under
+    /// `FileManager.temporaryDirectory`, which macOS periodically reaps on
+    /// its own, so there's no `atexit`/deinit handler here for the case
+    /// where the app quits with a kept temp still on disk.
     public func invalidate() {
         ratioCache.removeAll(keepingCapacity: true)
+        if let keptSample {
+            try? FileManager.default.removeItem(at: keptSample.compressedURL)
+        }
+        keptSample = nil
+        previewPair = nil
     }
 }

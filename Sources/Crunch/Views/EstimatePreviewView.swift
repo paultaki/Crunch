@@ -17,6 +17,12 @@ struct EstimatePreviewView: View {
     /// encode the resolved format at all (currently only AVIF) — shown as
     /// an inline explanation, same slot as `missingToolFormat`'s hint.
     let unsupportedFormat: ImageFormat?
+    /// Original/compressed sample URLs for the before/after preview sheet.
+    /// The Preview button is hidden whenever this is `nil` — estimating, no
+    /// sample, or settings changed since the last successful estimate.
+    let previewPair: (original: URL, compressed: URL)?
+
+    @State private var showingComparePreview = false
 
     /// The one inline notice to show in place of the size preview, if any.
     /// Unsupported takes priority — it's the rarer, more specific case.
@@ -36,6 +42,10 @@ struct EstimatePreviewView: View {
 
             Spacer(minLength: 8)
 
+            if previewPair != nil {
+                previewButton
+            }
+
             trailingBadge
         }
         .padding(.horizontal, 20)
@@ -50,6 +60,25 @@ struct EstimatePreviewView: View {
         )
         .padding(.horizontal, 20)
         .padding(.top, 10)
+        .sheet(isPresented: $showingComparePreview) {
+            if let previewPair {
+                ComparePreviewView(original: previewPair.original, compressed: previewPair.compressed)
+            }
+        }
+    }
+
+    // MARK: - Preview button
+
+    private var previewButton: some View {
+        Button {
+            showingComparePreview = true
+        } label: {
+            Label("Preview", systemImage: "rectangle.split.2x1")
+                .labelStyle(.iconOnly)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .help("Preview before/after")
     }
 
     // MARK: - Leading
