@@ -10,19 +10,19 @@ import ImageIO
 /// stored as a `CGImage` (thread-safe immutable) so `ImageFile` is `Sendable`
 /// and can be constructed on a background task before hand-off to the main
 /// actor.
-struct ImageFile: Identifiable, Sendable {
-    let id: UUID
-    let url: URL
-    let originalSize: Int64
-    let format: ImageFormat
-    let thumbnail: CGImage
-    let pixelWidth: Int
-    let pixelHeight: Int
+public struct ImageFile: Identifiable, Sendable {
+    public let id: UUID
+    public let url: URL
+    public let originalSize: Int64
+    public let format: ImageFormat
+    public let thumbnail: CGImage
+    public let pixelWidth: Int
+    public let pixelHeight: Int
 
     /// `id` defaults to a fresh UUID; callers reloading an existing file's
     /// metadata (see `load(from:id:)`) pass the original id through so
     /// SwiftUI list identity survives the reload.
-    init(
+    public init(
         id: UUID = UUID(),
         url: URL,
         originalSize: Int64,
@@ -40,9 +40,9 @@ struct ImageFile: Identifiable, Sendable {
         self.pixelHeight = pixelHeight
     }
 
-    var filename: String { url.lastPathComponent }
+    public var filename: String { url.lastPathComponent }
 
-    func resizedDimensions(percent: Int) -> (width: Int, height: Int) {
+    public func resizedDimensions(percent: Int) -> (width: Int, height: Int) {
         let scale = Double(percent) / 100.0
         return (
             width: Int(Double(pixelWidth) * scale),
@@ -55,7 +55,7 @@ struct ImageFile: Identifiable, Sendable {
     /// Callable from any thread. Pass `id` when reloading an existing
     /// file's metadata (e.g. after a cancelled compression run) so the
     /// returned value keeps the same identity.
-    static func load(from url: URL, id: UUID = UUID()) -> ImageFile? {
+    public static func load(from url: URL, id: UUID = UUID()) -> ImageFile? {
         guard let format = ImageFormat.from(extension: url.pathExtension) else {
             return nil
         }

@@ -1,18 +1,18 @@
 import Foundation
 
-enum AppState: Equatable {
+public enum AppState: Equatable, Sendable {
     case empty
     case loaded
     case compressing(completed: Int, total: Int)
     case results
 }
 
-enum ImageFormat: String, CaseIterable {
+public enum ImageFormat: String, CaseIterable, Sendable {
     case png
     case jpeg
     case webp
 
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .png: "PNG"
         case .jpeg: "JPEG"
@@ -20,7 +20,7 @@ enum ImageFormat: String, CaseIterable {
         }
     }
 
-    var fileExtension: String {
+    public var fileExtension: String {
         switch self {
         case .png: "png"
         case .jpeg: "jpg"
@@ -28,7 +28,7 @@ enum ImageFormat: String, CaseIterable {
         }
     }
 
-    static func from(extension ext: String) -> ImageFormat? {
+    public static func from(extension ext: String) -> ImageFormat? {
         switch ext.lowercased() {
         case "png": .png
         case "jpg", "jpeg": .jpeg
@@ -38,13 +38,13 @@ enum ImageFormat: String, CaseIterable {
     }
 }
 
-enum OutputFormat: String, CaseIterable {
+public enum OutputFormat: String, CaseIterable, Sendable {
     case same = "Same"
     case png = "PNG"
     case webp = "WebP"
     case jpeg = "JPEG"
 
-    func resolve(for original: ImageFormat) -> ImageFormat {
+    public func resolve(for original: ImageFormat) -> ImageFormat {
         switch self {
         case .same: original
         case .png: .png
@@ -54,7 +54,7 @@ enum OutputFormat: String, CaseIterable {
     }
 }
 
-enum ColorTier {
+public enum ColorTier: Sendable {
     case green    // >50% reduction
     case yellow   // 25-50%
     case gray     // <25%
@@ -62,7 +62,7 @@ enum ColorTier {
     case grew     // format conversion that grew the file
     case red      // failed
 
-    static func from(reduction: Double) -> ColorTier {
+    public static func from(reduction: Double) -> ColorTier {
         if reduction > 50 { .green }
         else if reduction > 25 { .yellow }
         else if reduction < 0 { .grew }

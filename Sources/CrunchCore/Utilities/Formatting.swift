@@ -1,6 +1,6 @@
 import Foundation
 
-extension Int64 {
+public extension Int64 {
     /// Human-readable file size, e.g. `"2.4 MB"`. Uses the system
     /// `ByteCountFormatter` so it respects locale and OS conventions.
     ///

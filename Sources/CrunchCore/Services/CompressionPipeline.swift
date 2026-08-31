@@ -4,12 +4,12 @@ import Foundation
 /// run (`CompressionViewModel`) and the sample-based size estimator
 /// (`EstimationService`), so both stay behavior-identical by construction —
 /// a fix to resize or format handling here fixes both call sites at once.
-enum CompressionPipeline {
-    struct Output: Sendable {
+public enum CompressionPipeline {
+    public struct Output: Sendable {
         /// Temp file holding the compressed result. Caller owns moving or
         /// deleting it — the pipeline never touches it once returned.
-        let url: URL
-        let bytes: Int64
+        public let url: URL
+        public let bytes: Int64
     }
 
     /// Compresses `file` per `settings` into a temp file and returns it.
@@ -21,7 +21,7 @@ enum CompressionPipeline {
     /// `Output` temp is cleaned up on throw too (there's no way for the
     /// caller to reach it), but left in place on success for the caller to
     /// own.
-    static func run(file: ImageFile, settings: CompressionSettings) async throws -> Output {
+    public static func run(file: ImageFile, settings: CompressionSettings) async throws -> Output {
         let outputFormat = settings.outputFormat.resolve(for: file.format)
         let quality = settings.quality
         let resolutionPercent = settings.resolutionPercent

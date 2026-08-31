@@ -1,10 +1,10 @@
 import Foundation
 
-enum BackupError: LocalizedError {
+public enum BackupError: LocalizedError, Sendable {
     case cannotCreateFolder(String)
     case cannotCopyFile(String, String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .cannotCreateFolder(let path):
             "Cannot create backup folder at: \(path)"
@@ -14,8 +14,8 @@ enum BackupError: LocalizedError {
     }
 }
 
-enum BackupService {
-    static let backupFolderName = "Uncompressed Backup"
+public enum BackupService {
+    public static let backupFolderName = "Uncompressed Backup"
 
     /// Copies `urls` into a per-directory `Uncompressed Backup` folder.
     ///
@@ -23,7 +23,7 @@ enum BackupService {
     /// of files doesn't block the main actor — callers should already have
     /// moved to `.compressing` state before awaiting this so the UI shows
     /// progress feedback immediately rather than appearing to hang.
-    static func backupFiles(_ urls: [URL]) async throws {
+    public static func backupFiles(_ urls: [URL]) async throws {
         try await Task.detached(priority: .userInitiated) {
             try backupFilesSync(urls)
         }.value

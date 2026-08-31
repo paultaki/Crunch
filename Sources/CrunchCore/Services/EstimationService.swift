@@ -9,7 +9,7 @@ import Foundation
 /// `WebPCompressor`) is deliberate — it guarantees the estimate tracks any
 /// fixes to the real pipeline without drift.
 @MainActor
-final class EstimationService {
+public final class EstimationService {
     struct Key: Hashable {
         let sampleID: UUID
         let outputFormat: OutputFormat
@@ -21,7 +21,7 @@ final class EstimationService {
     /// isn't installed" from other bail-out reasons (empty queue, decode
     /// failure, cancellation) so the UI can show an actionable install
     /// notice instead of a silent "—".
-    enum Outcome: Equatable {
+    public enum Outcome: Equatable, Sendable {
         case value(Int64)
         case toolMissing(ImageFormat)
         case unavailable
@@ -32,12 +32,14 @@ final class EstimationService {
     /// with eviction — wiggling the slider is instant.
     private var ratioCache: [Key: Double] = [:]
 
+    public init() {}
+
     /// Returns an estimate of the total compressed byte size for `files`
     /// at `settings`, or an `.unavailable`/`.toolMissing` outcome if
     /// estimation can't run (decode failure, cancellation, missing
     /// compressor, etc.). Safe to call concurrently — new calls simply
     /// cancel in-flight ones via Swift structured concurrency.
-    func estimate(
+    public func estimate(
         files: [ImageFile],
         settings: CompressionSettings
     ) async -> Outcome {
@@ -100,7 +102,7 @@ final class EstimationService {
 
     /// Called when files are removed from the queue so stale per-file
     /// entries don't linger. Not required for correctness, just tidy.
-    func invalidate() {
+    public func invalidate() {
         ratioCache.removeAll(keepingCapacity: true)
     }
 }

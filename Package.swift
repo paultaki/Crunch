@@ -8,9 +8,19 @@ let package = Package(
         .macOS(.v15)
     ],
     targets: [
+        .target(
+            name: "CrunchCore",
+            path: "Sources/CrunchCore"
+        ),
         .executableTarget(
             name: "Crunch",
+            dependencies: ["CrunchCore"],
             path: "Sources/Crunch"
+        ),
+        .testTarget(
+            name: "CrunchTests",
+            dependencies: ["CrunchCore"],
+            path: "Tests/CrunchTests"
         )
     ]
 )

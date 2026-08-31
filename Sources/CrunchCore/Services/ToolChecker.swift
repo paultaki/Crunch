@@ -11,7 +11,7 @@ import Foundation
 /// Resolution is done per-call (no cache) so the implementation stays
 /// `Sendable` under Swift 6 strict concurrency — six `stat` calls per
 /// compression run are effectively free.
-enum ToolChecker {
+public enum ToolChecker {
     private static let searchPaths = [
         "/opt/homebrew/bin",
         "/usr/local/bin",
@@ -24,7 +24,7 @@ enum ToolChecker {
     /// have it — covers custom Homebrew prefixes, linuxbrew-style setups, or
     /// anything installed outside the common defaults. Plain directory
     /// `stat` calls (no subprocess) keep this synchronous and cheap.
-    static func resolve(_ tool: String) -> String? {
+    public static func resolve(_ tool: String) -> String? {
         let fm = FileManager.default
         for dir in searchPaths {
             let candidate = "\(dir)/\(tool)"
@@ -43,12 +43,12 @@ enum ToolChecker {
         return nil
     }
 
-    static var pngquantPath: String? { resolve("pngquant") }
-    static var cwebpPath: String? { resolve("cwebp") }
+    public static var pngquantPath: String? { resolve("pngquant") }
+    public static var cwebpPath: String? { resolve("cwebp") }
 
     /// Returns a user-facing install message if any tools required by
     /// `formats` are missing, or `nil` if everything is available.
-    static func missingTools(for formats: Set<ImageFormat>) -> String? {
+    public static func missingTools(for formats: Set<ImageFormat>) -> String? {
         let pngquantMissing = formats.contains(.png) && pngquantPath == nil
         let cwebpMissing = formats.contains(.webp) && cwebpPath == nil
 

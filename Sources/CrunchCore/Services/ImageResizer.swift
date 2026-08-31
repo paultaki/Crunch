@@ -4,7 +4,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-enum ImageResizer {
+public enum ImageResizer {
     /// Resizes `input` to `width`×`height` and writes the result to a temp
     /// PNG file, returning its URL.
     ///
@@ -16,7 +16,7 @@ enum ImageResizer {
     /// intermediate feeding into `PNGCompressor`/`JPEGCompressor`, which
     /// already apply the caller's requested quality, so a lossless
     /// intermediate avoids a second, uncontrolled lossy generation.
-    static func resize(
+    public static func resize(
         input: URL,
         width: Int,
         height: Int,

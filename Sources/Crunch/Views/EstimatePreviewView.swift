@@ -1,3 +1,4 @@
+import CrunchCore
 import SwiftUI
 
 /// Shows a live before/after preview of the expected compression result,
