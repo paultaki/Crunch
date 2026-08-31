@@ -16,8 +16,9 @@ See `docs/recording-notes.md` for exactly what to capture.
 - Compression runs in parallel, bounded to your CPU core count, with working cancellation mid-batch.
 - Originals are copied to an `Uncompressed Backup` folder next to the source files before anything is overwritten.
 - Never makes a file worse: if the compressed output isn't smaller than the original, the original is left alone and the result is reported as "Already optimized." Explicit format conversions (say, PNG to WebP) always deliver, even if the converted file happens to be larger.
-- PNG, JPEG, and WebP, including conversion between the three and resolution scaling.
-- Writes are atomic: compress to a temp file, then replace the original in place, so a crash or kill mid-run can't leave a half-written file.
+- PNG, JPEG, WebP, and AVIF, including conversion between the four and resolution scaling.
+- AVIF output via ImageIO, no external tools. It is offered only when this Mac's ImageIO can actually encode it, checked at runtime. AVIF input decodes everywhere macOS 15 does.
+- Writes go to a temp file first. In-place compression then replaces the original atomically, so a crash or kill mid-run can't leave a half-written file.
 - If pngquant or cwebp aren't installed, Crunch tells you inline and gives you the install command instead of failing silently.
 
 ## Install
@@ -38,9 +39,11 @@ JPEG compression works with zero external dependencies, it uses ImageIO natively
 
 ## How it works
 
-PNG compression shells out to `pngquant`, WebP to `cwebp`. Both are located at runtime by checking `/opt/homebrew/bin`, `/usr/local/bin`, and `/opt/local/bin` in order, then falling back to a `PATH` scan. JPEG is handled entirely in-process via ImageIO, no subprocess involved.
+PNG compression shells out to `pngquant`, WebP to `cwebp`. Both are located at runtime by checking `/opt/homebrew/bin`, `/usr/local/bin`, and `/opt/local/bin` in order, then falling back to a `PATH` scan. JPEG and AVIF are handled entirely in-process via ImageIO, no subprocess involved.
 
-Every compression writes to a temp file first, then atomically replaces the original (`FileManager.replaceItemAt`) so a partial write never corrupts a source file. Before any of that happens, the batch is copied to `Uncompressed Backup` in the same folder as the originals.
+Every compression writes to a temp file first. Before any of that happens, the batch is copied to `Uncompressed Backup` in the same folder as the originals.
+
+Compressing a file in its existing format then atomically replaces it (`FileManager.replaceItemAt`), so a partial write never corrupts a source file. Converting to a different format is not an in-place replace: the output moves to a new path picked up front and guaranteed not to collide with anything already on disk or with another file in the same batch, and only then is the source deleted. A crash between those two steps leaves both files, never neither.
 
 ## Development
 

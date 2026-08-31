@@ -50,6 +50,22 @@ final class BackupServiceTests {
         #expect(FileManager.default.fileExists(atPath: backupDir.appendingPathComponent("photo-2.png").path))
     }
 
+    @Test("collision naming on an extensionless file doesn't emit a trailing dot")
+    func collisionNamingWithoutExtension() async throws {
+        let fileURL = tempDir.appendingPathComponent("photo")
+        let backupDir = tempDir.appendingPathComponent(BackupService.backupFolderName)
+
+        try Data("v1".utf8).write(to: fileURL)
+        try await BackupService.backupFiles([fileURL])
+
+        try Data("v2".utf8).write(to: fileURL)
+        try await BackupService.backupFiles([fileURL])
+
+        #expect(FileManager.default.fileExists(atPath: backupDir.appendingPathComponent("photo").path))
+        #expect(FileManager.default.fileExists(atPath: backupDir.appendingPathComponent("photo-1").path))
+        #expect(!FileManager.default.fileExists(atPath: backupDir.appendingPathComponent("photo-1.").path))
+    }
+
     @Test("groups backups by each file's parent directory")
     func groupsByParentDirectory() async throws {
         let subDirA = tempDir.appendingPathComponent("A")

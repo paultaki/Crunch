@@ -23,6 +23,10 @@ public enum BackupService {
     /// of files doesn't block the main actor — callers should already have
     /// moved to `.compressing` state before awaiting this so the UI shows
     /// progress feedback immediately rather than appearing to hang.
+    ///
+    /// Cancellation is intentionally not observed: a half-finished backup
+    /// would leave files that are about to be compressed with no original to
+    /// restore from, so the copy always runs to completion.
     public static func backupFiles(_ urls: [URL]) async throws {
         try await Task.detached(priority: .userInitiated) {
             try backupFilesSync(urls)
@@ -81,7 +85,9 @@ public enum BackupService {
         var counter = 1
 
         while true {
-            let name = "\(baseName)-\(counter).\(ext)"
+            // Extensionless sources ("photo") must stay extensionless
+            // ("photo-1"), not gain a trailing dot.
+            let name = ext.isEmpty ? "\(baseName)-\(counter)" : "\(baseName)-\(counter).\(ext)"
             let candidate = directory.appendingPathComponent(name)
             if !fm.fileExists(atPath: candidate.path) {
                 return candidate
