@@ -17,13 +17,13 @@ public enum CompressionPipeline {
     ///
     /// `stagingDirectory` is not a convenience knob: `replaceItemAt` and
     /// `moveItem` are only guaranteed to be atomic within a single volume,
-    /// so a caller that delivers the output onto a user file MUST stage it
-    /// in that file's own directory. Staging in
-    /// `FileManager.default.temporaryDirectory` (the boot volume) made every
-    /// delivery onto an external drive or network share fail with POSIX 18,
-    /// "Cross-device link". Callers that only measure the output and throw it
-    /// away (`EstimationService`) pass the system temp directory instead, so
-    /// they don't litter the user's folder.
+    /// so a caller that delivers the output onto a user file MUST hand in a
+    /// directory on that file's volume — see `StagingArea`, which picks one.
+    /// Staging in `FileManager.default.temporaryDirectory` (the boot volume)
+    /// made every delivery onto an external drive or network share fail with
+    /// POSIX 18, "Cross-device link". Callers that only measure the output
+    /// and throw it away (`EstimationService`) pass the system temp
+    /// directory, which needs no such guarantee.
     ///
     /// The pipeline never reads or writes `file.url` itself beyond decoding
     /// it — callers are responsible for moving the returned temp into place
@@ -48,28 +48,14 @@ public enum CompressionPipeline {
             resize = nil
         }
 
-        // Dot-prefixed on purpose. For a real compression run this file
-        // briefly exists in the user's own folder, and a visible stray
-        // `crunch-<uuid>.jpg` sitting next to their photos is alarming (and
-        // would show up in a screen recording).
+        // Dot-prefixed on purpose. `StagingArea` normally hands us a private
+        // directory nobody looks at, but its fallback rung is the user's own
+        // folder, and a visible stray `crunch-<uuid>.jpg` sitting next to
+        // their photos is alarming (and would show up in a screen recording).
+        // Uniform across both rungs because one naming rule is simpler than
+        // two.
         let tempOutput = stagingDirectory
             .appendingPathComponent(".crunch-\(UUID().uuidString).\(outputFormat.fileExtension)")
-
-        // Prove up front that we can write there, and fail with a message
-        // naming the folder if we can't (read-only folder, permissions).
-        // There is deliberately NO fallback to staging elsewhere and copying
-        // across the volume boundary: the temp-then-atomic-replace design is
-        // the whole reason a crash can never leave a half-written original,
-        // and that guarantee is not worth trading for a file that compresses.
-        //
-        // The probe file is removed again rather than left as a placeholder,
-        // so a compressor that exits cleanly without writing anything still
-        // fails the size check below instead of producing a 0-byte "output"
-        // that would sail past the caller's never-worse guard.
-        guard FileManager.default.createFile(atPath: tempOutput.path, contents: nil) else {
-            throw CompressionError.cannotStageOutput(stagingDirectory.lastPathComponent)
-        }
-        try? FileManager.default.removeItem(at: tempOutput)
 
         var resizedTemp: URL?
         var succeeded = false
@@ -128,16 +114,39 @@ public enum CompressionPipeline {
             )
         }
 
-        // A missing size must fail, never default to 0. Zero bytes reads as a
-        // 100%-saved success to every caller, which would defeat the
-        // never-worse guard (`0 >= originalSize` is false) and let a bogus
-        // temp replace the user's file.
-        guard let fileSize = try tempOutput.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
-            throw CompressionError.cannotWriteImage(tempOutput.lastPathComponent)
-        }
-        let bytes = Int64(fileSize)
+        let bytes = try outputSize(of: tempOutput, sourceName: file.filename)
 
         succeeded = true
         return Output(url: tempOutput, bytes: bytes)
+    }
+
+    /// Byte size of a finished compression output, rejecting both of the ways
+    /// a compressor can look like it succeeded while producing nothing
+    /// usable: no file at all, and an empty file.
+    ///
+    /// Zero is the dangerous one, and it is not hypothetical — `.fileSize` on
+    /// an empty file returns `Optional(0)`, not `nil`, so a plain `guard let`
+    /// unwraps it happily. Downstream, 0 bytes reads as a 100%-saved success
+    /// to everything: `CompressionJob`'s never-worse guard compares
+    /// `0 >= originalSize`, which is false for any real photo, so the empty
+    /// file would be delivered onto the user's original and `BatchSummary`
+    /// would report it as a total win.
+    ///
+    /// `sourceName` is the user's filename rather than the internal staging
+    /// name, because that is what an error message has to be about.
+    ///
+    /// Public so this guard can be tested directly. Reaching it through the
+    /// pipeline would mean adding a fake-compressor injection seam to
+    /// production code for no other reason, which costs more than it buys.
+    public static func outputSize(of url: URL, sourceName: String) throws -> Int64 {
+        // `try?` on purpose: a missing file and an empty file are the same
+        // failure to the user, and both deserve the message naming their
+        // file rather than a raw Cocoa "couldn't be opened" for one and a
+        // clear message for the other.
+        let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+        guard let fileSize, fileSize > 0 else {
+            throw CompressionError.cannotWriteImage(sourceName)
+        }
+        return Int64(fileSize)
     }
 }

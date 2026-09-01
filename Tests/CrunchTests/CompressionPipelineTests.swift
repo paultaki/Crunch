@@ -40,54 +40,48 @@ struct CompressionPipelineTests {
         #expect(FileManager.default.fileExists(atPath: output.url.path))
     }
 
-    // No silent fallback: an unwritable destination folder has to surface as
-    // a clear per-file error naming the folder, not as an obscure encoder
-    // failure and not as a cross-volume copy that would give up atomicity.
-    @Test("an unwritable staging directory throws an error naming the folder")
-    func unwritableStagingDirectoryThrows() async throws {
+    // The 0-byte hazard, which is the most dangerous thing this file
+    // guards. `.fileSize` on an empty file returns Optional(0), not nil, so
+    // the old `guard let` unwrapped it cleanly; the never-worse guard then
+    // compares `0 >= originalSize`, which is false, and the empty file gets
+    // delivered onto the user's photo and reported as a 100% saving.
+    @Test("a zero-byte output is rejected, not reported as a total saving")
+    func zeroByteOutputIsRejected() throws {
+        let empty = FileManager.default.temporaryDirectory
+            .appendingPathComponent("crunch-empty-\(UUID().uuidString).jpg")
+        #expect(FileManager.default.createFile(atPath: empty.path, contents: Data()))
+        defer { try? FileManager.default.removeItem(at: empty) }
+
+        // Documents the trap itself: this is Optional(0), not nil.
+        let reported = try #require(empty.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        #expect(reported == 0)
+
+        #expect {
+            _ = try CompressionPipeline.outputSize(of: empty, sourceName: "vacation.jpg")
+        } throws: { error in
+            error.localizedDescription.contains("vacation.jpg")
+        }
+    }
+
+    @Test("a missing output is rejected with the same error naming the user's file")
+    func missingOutputIsRejected() {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("crunch-absent-\(UUID().uuidString).jpg")
+
+        #expect {
+            _ = try CompressionPipeline.outputSize(of: missing, sourceName: "vacation.jpg")
+        } throws: { error in
+            error.localizedDescription.contains("vacation.jpg")
+        }
+    }
+
+    @Test("a real output reports its size")
+    func realOutputReportsItsSize() throws {
         let sourceURL = try TestImageFactory.makeSolidPNG(width: 64, height: 64)
         defer { try? FileManager.default.removeItem(at: sourceURL) }
 
-        let folderName = "crunch-readonly-\(UUID().uuidString)"
-        let staging = FileManager.default.temporaryDirectory
-            .appendingPathComponent(folderName)
-        try FileManager.default.createDirectory(
-            at: staging,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o500]
-        )
-        defer {
-            // Restore write permission first or the directory can't be removed.
-            try? FileManager.default.setAttributes(
-                [.posixPermissions: 0o700],
-                ofItemAtPath: staging.path
-            )
-            try? FileManager.default.removeItem(at: staging)
-        }
-
-        // Running as root ignores the mode bits entirely, which would make
-        // this test assert nothing. Skip honestly instead of passing falsely.
-        try #require(
-            !FileManager.default.isWritableFile(atPath: staging.path),
-            "staging directory is still writable (running as root?)"
-        )
-
-        let file = try #require(ImageFile.load(from: sourceURL))
-        let settings = CompressionSettings(outputFormat: .jpeg, resolutionPercent: 100, quality: 80)
-
-        await #expect {
-            _ = try await CompressionPipeline.run(
-                file: file,
-                settings: settings,
-                stagingDirectory: staging
-            )
-        } throws: { error in
-            error.localizedDescription.contains(folderName)
-        }
-
-        // Nothing was left behind in the folder we couldn't write to.
-        let leftovers = try? FileManager.default.contentsOfDirectory(atPath: staging.path)
-        #expect(leftovers?.isEmpty ?? true)
+        let size = try CompressionPipeline.outputSize(of: sourceURL, sourceName: "solid.png")
+        #expect(size > 0)
     }
 
     @Test("JPEG output path compresses end-to-end via native ImageIO")
