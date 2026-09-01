@@ -28,7 +28,18 @@ public enum CompressionJob {
         let isConversion = outputFormat != file.format
 
         do {
-            let output = try await CompressionPipeline.run(file: file, settings: settings)
+            // Stage the compressed output in the folder it is about to land
+            // in. `deliver` below relies on `replaceItemAt`/`moveItem`, which
+            // are only atomic within one volume — staging in the system temp
+            // directory broke every delivery onto an external drive or
+            // network share ("Cross-device link"). The destination is already
+            // fixed by `OutputDestinationPlanner` before any task spawned, so
+            // its directory is known here.
+            let output = try await CompressionPipeline.run(
+                file: file,
+                settings: settings,
+                stagingDirectory: destination.deletingLastPathComponent()
+            )
 
             // The pipeline hands ownership of its temp to us. Every exit from
             // here that doesn't move it into place has to delete it — the

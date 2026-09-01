@@ -12,7 +12,18 @@ public enum CompressionPipeline {
         public let bytes: Int64
     }
 
-    /// Compresses `file` per `settings` into a temp file and returns it.
+    /// Compresses `file` per `settings` into a temp file inside
+    /// `stagingDirectory` and returns it.
+    ///
+    /// `stagingDirectory` is not a convenience knob: `replaceItemAt` and
+    /// `moveItem` are only guaranteed to be atomic within a single volume,
+    /// so a caller that delivers the output onto a user file MUST stage it
+    /// in that file's own directory. Staging in
+    /// `FileManager.default.temporaryDirectory` (the boot volume) made every
+    /// delivery onto an external drive or network share fail with POSIX 18,
+    /// "Cross-device link". Callers that only measure the output and throw it
+    /// away (`EstimationService`) pass the system temp directory instead, so
+    /// they don't litter the user's folder.
     ///
     /// The pipeline never reads or writes `file.url` itself beyond decoding
     /// it — callers are responsible for moving the returned temp into place
@@ -21,7 +32,11 @@ public enum CompressionPipeline {
     /// `Output` temp is cleaned up on throw too (there's no way for the
     /// caller to reach it), but left in place on success for the caller to
     /// own.
-    public static func run(file: ImageFile, settings: CompressionSettings) async throws -> Output {
+    public static func run(
+        file: ImageFile,
+        settings: CompressionSettings,
+        stagingDirectory: URL
+    ) async throws -> Output {
         let outputFormat = settings.outputFormat.resolve(for: file.format)
         let quality = settings.quality
         let resolutionPercent = settings.resolutionPercent
@@ -33,8 +48,28 @@ public enum CompressionPipeline {
             resize = nil
         }
 
-        let tempOutput = FileManager.default.temporaryDirectory
-            .appendingPathComponent("crunch-\(UUID().uuidString).\(outputFormat.fileExtension)")
+        // Dot-prefixed on purpose. For a real compression run this file
+        // briefly exists in the user's own folder, and a visible stray
+        // `crunch-<uuid>.jpg` sitting next to their photos is alarming (and
+        // would show up in a screen recording).
+        let tempOutput = stagingDirectory
+            .appendingPathComponent(".crunch-\(UUID().uuidString).\(outputFormat.fileExtension)")
+
+        // Prove up front that we can write there, and fail with a message
+        // naming the folder if we can't (read-only folder, permissions).
+        // There is deliberately NO fallback to staging elsewhere and copying
+        // across the volume boundary: the temp-then-atomic-replace design is
+        // the whole reason a crash can never leave a half-written original,
+        // and that guarantee is not worth trading for a file that compresses.
+        //
+        // The probe file is removed again rather than left as a placeholder,
+        // so a compressor that exits cleanly without writing anything still
+        // fails the size check below instead of producing a 0-byte "output"
+        // that would sail past the caller's never-worse guard.
+        guard FileManager.default.createFile(atPath: tempOutput.path, contents: nil) else {
+            throw CompressionError.cannotStageOutput(stagingDirectory.lastPathComponent)
+        }
+        try? FileManager.default.removeItem(at: tempOutput)
 
         var resizedTemp: URL?
         var succeeded = false

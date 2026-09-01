@@ -37,6 +37,10 @@ enum CompressionError: LocalizedError {
     case cannotReadImage(String)
     case cannotCreateContext(String)
     case cannotWriteImage(String)
+    /// The compressed output couldn't be staged in the folder it has to be
+    /// delivered into. Carries the folder name, not the file name: the fix is
+    /// always about that folder's permissions.
+    case cannotStageOutput(String)
     case toolMissing(String)
     case avifNotSupported
 
@@ -45,6 +49,8 @@ enum CompressionError: LocalizedError {
         case .cannotReadImage(let name): "Cannot read image: \(name)"
         case .cannotCreateContext(let name): "Cannot create drawing context for: \(name)"
         case .cannotWriteImage(let name): "Cannot write image: \(name)"
+        case .cannotStageOutput(let folder):
+            "Cannot write a temporary file in the folder “\(folder)” — check its permissions."
         case .toolMissing(let name): "Required tool not found: \(name)"
         case .avifNotSupported: MissingToolsMessage.avifUnsupported
         }

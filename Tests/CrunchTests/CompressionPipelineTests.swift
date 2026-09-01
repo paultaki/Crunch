@@ -5,6 +5,91 @@ import Testing
 
 @Suite("CompressionPipeline")
 struct CompressionPipelineTests {
+    // The cross-volume fix in one deterministic, CI-safe assertion: the
+    // output temp must be created in the directory it was handed, because
+    // that is what makes the caller's `replaceItemAt` a same-volume (and
+    // therefore atomic, and therefore possible) operation. CI has only one
+    // volume, so "same directory as asked" is the invariant that stands in
+    // for "same volume as the user's file".
+    @Test("output temp is staged in the directory the caller handed in, dot-prefixed")
+    func outputIsStagedInGivenDirectory() async throws {
+        let sourceURL = try TestImageFactory.makeSolidPNG(width: 64, height: 64)
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("crunch-staging-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
+
+        let file = try #require(ImageFile.load(from: sourceURL))
+        let settings = CompressionSettings(outputFormat: .jpeg, resolutionPercent: 100, quality: 80)
+
+        let output = try await CompressionPipeline.run(
+            file: file,
+            settings: settings,
+            stagingDirectory: staging
+        )
+        defer { try? FileManager.default.removeItem(at: output.url) }
+
+        #expect(
+            output.url.deletingLastPathComponent().standardizedFileURL
+                == staging.standardizedFileURL
+        )
+        // Hidden while it sits in what may be the user's own folder.
+        #expect(output.url.lastPathComponent.hasPrefix(".crunch-"))
+        #expect(FileManager.default.fileExists(atPath: output.url.path))
+    }
+
+    // No silent fallback: an unwritable destination folder has to surface as
+    // a clear per-file error naming the folder, not as an obscure encoder
+    // failure and not as a cross-volume copy that would give up atomicity.
+    @Test("an unwritable staging directory throws an error naming the folder")
+    func unwritableStagingDirectoryThrows() async throws {
+        let sourceURL = try TestImageFactory.makeSolidPNG(width: 64, height: 64)
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+        let folderName = "crunch-readonly-\(UUID().uuidString)"
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent(folderName)
+        try FileManager.default.createDirectory(
+            at: staging,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o500]
+        )
+        defer {
+            // Restore write permission first or the directory can't be removed.
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: staging.path
+            )
+            try? FileManager.default.removeItem(at: staging)
+        }
+
+        // Running as root ignores the mode bits entirely, which would make
+        // this test assert nothing. Skip honestly instead of passing falsely.
+        try #require(
+            !FileManager.default.isWritableFile(atPath: staging.path),
+            "staging directory is still writable (running as root?)"
+        )
+
+        let file = try #require(ImageFile.load(from: sourceURL))
+        let settings = CompressionSettings(outputFormat: .jpeg, resolutionPercent: 100, quality: 80)
+
+        await #expect {
+            _ = try await CompressionPipeline.run(
+                file: file,
+                settings: settings,
+                stagingDirectory: staging
+            )
+        } throws: { error in
+            error.localizedDescription.contains(folderName)
+        }
+
+        // Nothing was left behind in the folder we couldn't write to.
+        let leftovers = try? FileManager.default.contentsOfDirectory(atPath: staging.path)
+        #expect(leftovers?.isEmpty ?? true)
+    }
+
     @Test("JPEG output path compresses end-to-end via native ImageIO")
     func jpegPathEndToEnd() async throws {
         let sourceURL = try TestImageFactory.makeSolidPNG(width: 64, height: 64)
@@ -13,7 +98,11 @@ struct CompressionPipelineTests {
         let file = try #require(ImageFile.load(from: sourceURL))
         let settings = CompressionSettings(outputFormat: .jpeg, resolutionPercent: 100, quality: 80)
 
-        let output = try await CompressionPipeline.run(file: file, settings: settings)
+        let output = try await CompressionPipeline.run(
+            file: file,
+            settings: settings,
+            stagingDirectory: FileManager.default.temporaryDirectory
+        )
         defer { try? FileManager.default.removeItem(at: output.url) }
 
         #expect(output.bytes > 0)
@@ -41,7 +130,11 @@ struct CompressionPipelineTests {
         let file = try #require(ImageFile.load(from: sourceURL))
         let settings = CompressionSettings(outputFormat: .avif, resolutionPercent: 100, quality: 80)
 
-        let output = try await CompressionPipeline.run(file: file, settings: settings)
+        let output = try await CompressionPipeline.run(
+            file: file,
+            settings: settings,
+            stagingDirectory: FileManager.default.temporaryDirectory
+        )
         defer { try? FileManager.default.removeItem(at: output.url) }
 
         #expect(output.bytes > 0)
@@ -65,7 +158,11 @@ struct CompressionPipelineTests {
         let file = try #require(ImageFile.load(from: sourceURL))
         let settings = CompressionSettings(outputFormat: .avif, resolutionPercent: 100, quality: 80)
 
-        let output = try await CompressionPipeline.run(file: file, settings: settings)
+        let output = try await CompressionPipeline.run(
+            file: file,
+            settings: settings,
+            stagingDirectory: FileManager.default.temporaryDirectory
+        )
         defer { try? FileManager.default.removeItem(at: output.url) }
 
         let reloaded = try #require(ImageFile.load(from: output.url))
@@ -87,7 +184,11 @@ struct CompressionPipelineTests {
         let file = try #require(ImageFile.load(from: sourceURL))
         let settings = CompressionSettings(outputFormat: .png, resolutionPercent: 100, quality: 80)
 
-        let output = try await CompressionPipeline.run(file: file, settings: settings)
+        let output = try await CompressionPipeline.run(
+            file: file,
+            settings: settings,
+            stagingDirectory: FileManager.default.temporaryDirectory
+        )
         defer { try? FileManager.default.removeItem(at: output.url) }
 
         #expect(output.bytes > 0)
@@ -108,7 +209,8 @@ struct CompressionPipelineTests {
         let pngFile = try #require(ImageFile.load(from: pngURL))
         let avif = try await CompressionPipeline.run(
             file: pngFile,
-            settings: CompressionSettings(outputFormat: .avif, resolutionPercent: 100, quality: 80)
+            settings: CompressionSettings(outputFormat: .avif, resolutionPercent: 100, quality: 80),
+            stagingDirectory: FileManager.default.temporaryDirectory
         )
         defer { try? FileManager.default.removeItem(at: avif.url) }
 
@@ -117,7 +219,8 @@ struct CompressionPipelineTests {
 
         let webp = try await CompressionPipeline.run(
             file: avifFile,
-            settings: CompressionSettings(outputFormat: .webp, resolutionPercent: 100, quality: 80)
+            settings: CompressionSettings(outputFormat: .webp, resolutionPercent: 100, quality: 80),
+            stagingDirectory: FileManager.default.temporaryDirectory
         )
         defer { try? FileManager.default.removeItem(at: webp.url) }
 
@@ -141,7 +244,11 @@ struct CompressionPipelineTests {
         let file = try #require(ImageFile.load(from: sourceURL))
         let settings = CompressionSettings(outputFormat: .webp, resolutionPercent: 100, quality: 80)
 
-        let output = try await CompressionPipeline.run(file: file, settings: settings)
+        let output = try await CompressionPipeline.run(
+            file: file,
+            settings: settings,
+            stagingDirectory: FileManager.default.temporaryDirectory
+        )
         defer { try? FileManager.default.removeItem(at: output.url) }
 
         #expect(output.bytes > 0)
