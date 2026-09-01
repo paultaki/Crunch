@@ -37,9 +37,19 @@ enum CompressionError: LocalizedError {
     case cannotReadImage(String)
     case cannotCreateContext(String)
     case cannotWriteImage(String)
-    /// The compressed output couldn't be staged in the folder it has to be
-    /// delivered into. Carries the folder name, not the file name: the fix is
-    /// always about that folder's permissions.
+    /// Nothing on the destination's *volume* can hold a temporary file —
+    /// neither a private replacement directory nor the destination's own
+    /// folder. See `StagingArea` for the ladder that has to fail all the way
+    /// down before this is thrown.
+    ///
+    /// Volume-scoped, not folder-scoped: a read-only folder on a writable
+    /// volume does NOT reach here, because the replacement directory is
+    /// created against the volume and succeeds. That case fails one step
+    /// later, at delivery, with a permissions error from `replaceItemAt`.
+    ///
+    /// Carries the destination folder's name because that is the part of the
+    /// path the user recognizes, even though the cause is usually the volume
+    /// (read-only mount, out of space).
     case cannotStageOutput(String)
     case toolMissing(String)
     case avifNotSupported

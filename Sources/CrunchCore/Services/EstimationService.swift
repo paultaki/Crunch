@@ -143,15 +143,15 @@ public final class EstimationService {
         guard file.originalSize > 0 else { return nil }
 
         do {
-            // System temp, not the sample's own folder: this output is only
-            // ever measured and (eventually) deleted, never moved onto a user
-            // file, so it needs no same-volume atomicity — and staging it
-            // next to the user's photos would drop a file in their folder on
-            // every quality-slider wiggle.
+            // Transient, not same-volume: this output is only ever measured
+            // and (eventually) deleted, never moved onto a user file, so it
+            // needs no atomicity guarantee — and staging it next to the
+            // user's photos would drop a file in their folder on every
+            // quality-slider wiggle.
             let output = try await CompressionPipeline.run(
                 file: file,
                 settings: settings,
-                stagingDirectory: FileManager.default.temporaryDirectory
+                staging: StagingArea.transient()
             )
             if let previous = keptSample {
                 try? FileManager.default.removeItem(at: previous.compressedURL)

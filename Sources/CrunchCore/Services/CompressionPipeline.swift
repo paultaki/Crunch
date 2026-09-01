@@ -12,18 +12,24 @@ public enum CompressionPipeline {
         public let bytes: Int64
     }
 
-    /// Compresses `file` per `settings` into a temp file inside
-    /// `stagingDirectory` and returns it.
+    /// Compresses `file` per `settings` into a temp file inside `staging`
+    /// and returns it.
     ///
-    /// `stagingDirectory` is not a convenience knob: `replaceItemAt` and
-    /// `moveItem` are only guaranteed to be atomic within a single volume,
-    /// so a caller that delivers the output onto a user file MUST hand in a
-    /// directory on that file's volume — see `StagingArea`, which picks one.
-    /// Staging in `FileManager.default.temporaryDirectory` (the boot volume)
-    /// made every delivery onto an external drive or network share fail with
-    /// POSIX 18, "Cross-device link". Callers that only measure the output
-    /// and throw it away (`EstimationService`) pass the system temp
-    /// directory, which needs no such guarantee.
+    /// `staging` is a `StagingArea.Reservation` rather than a bare `URL` on
+    /// purpose, and it is the load-bearing detail of the whole cross-volume
+    /// fix. `replaceItemAt` and `moveItem` are only guaranteed atomic within
+    /// a single volume, so a caller that delivers the output onto a user file
+    /// must stage it on that file's volume; staging in
+    /// `FileManager.default.temporaryDirectory` (the boot volume) made every
+    /// delivery onto an external drive or network share fail with POSIX 18,
+    /// "Cross-device link".
+    ///
+    /// Taking a `Reservation` makes that unrepresentable rather than merely
+    /// documented: a `Reservation` can only come from
+    /// `StagingArea.reserve(for:)` (same volume as a destination) or
+    /// `StagingArea.transient()` (measure-and-discard only), so handing this
+    /// an arbitrary directory — the user's own folder, say, or the system
+    /// temp on a delivery path — does not compile.
     ///
     /// The pipeline never reads or writes `file.url` itself beyond decoding
     /// it — callers are responsible for moving the returned temp into place
@@ -35,7 +41,7 @@ public enum CompressionPipeline {
     public static func run(
         file: ImageFile,
         settings: CompressionSettings,
-        stagingDirectory: URL
+        staging: StagingArea.Reservation
     ) async throws -> Output {
         let outputFormat = settings.outputFormat.resolve(for: file.format)
         let quality = settings.quality
@@ -54,7 +60,7 @@ public enum CompressionPipeline {
         // their photos is alarming (and would show up in a screen recording).
         // Uniform across both rungs because one naming rule is simpler than
         // two.
-        let tempOutput = stagingDirectory
+        let tempOutput = staging.directory
             .appendingPathComponent(".crunch-\(UUID().uuidString).\(outputFormat.fileExtension)")
 
         var resizedTemp: URL?

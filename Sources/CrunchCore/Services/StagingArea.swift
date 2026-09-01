@@ -52,8 +52,24 @@ public enum StagingArea {
         return Reservation(directory: destinationDirectory, ownedDirectory: nil)
     }
 
+    /// Staging for output that is only measured and thrown away, never
+    /// delivered onto a user file — `EstimationService`'s sample.
+    ///
+    /// System temp, so it is explicitly NOT safe for delivery: nothing here
+    /// guarantees the same volume as any destination. The name says so, which
+    /// is the point — `Reservation` is the only thing the pipeline accepts,
+    /// and the only two ways to get one are this and `reserve(for:)`, so
+    /// choosing the wrong staging location for a delivery has to be a
+    /// deliberate act rather than an accidental one-line edit.
+    public static func transient() -> Reservation {
+        // Nothing to release: the system temp directory isn't ours, and macOS
+        // reaps its contents on its own.
+        Reservation(directory: FileManager.default.temporaryDirectory, ownedDirectory: nil)
+    }
+
     /// Removes the whole private directory, not just the file inside it —
-    /// every `reserve` mints a fresh one. A no-op on the fallback path.
+    /// every `reserve` mints a fresh one. A no-op for a transient
+    /// reservation and on the fallback path.
     /// Best-effort by design: a failure here leaks an empty directory in a
     /// place the OS already reaps, and must never mask the compression
     /// result.

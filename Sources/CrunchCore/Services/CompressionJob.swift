@@ -45,7 +45,7 @@ public enum CompressionJob {
             let output = try await CompressionPipeline.run(
                 file: file,
                 settings: settings,
-                stagingDirectory: staging.directory
+                staging: staging
             )
 
             // The pipeline hands ownership of its temp to us. Every exit from

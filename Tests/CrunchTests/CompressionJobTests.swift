@@ -10,6 +10,14 @@ import Testing
 /// JPEG throughout so the tests are deterministic anywhere: it encodes via
 /// native ImageIO with no pngquant/cwebp dependency.
 ///
+/// Note what these do NOT pin. They inspect the folder after `run` has
+/// returned and cleaned up, so they stay green whether staging went to the
+/// right place or the wrong one. The staging *choice* is pinned two other
+/// ways instead: `StagingAreaTests` proves a reservation for a destination is
+/// same-volume and outside the destination's folder, and
+/// `CompressionPipeline.run` takes a `StagingArea.Reservation` rather than a
+/// `URL`, so handing it a bare directory doesn't compile.
+///
 /// `.serialized` because the residue check below scans the volume's shared
 /// replacement directories for our staging prefix. Run in parallel, these
 /// tests see each other's in-flight staging files and report a leak that
@@ -34,7 +42,7 @@ struct CompressionJobTests {
                 resolutionPercent: 100,
                 quality: quality
             ),
-            stagingDirectory: FileManager.default.temporaryDirectory
+            staging: StagingArea.transient()
         )
 
         let jpegURL = directory.appendingPathComponent(name)

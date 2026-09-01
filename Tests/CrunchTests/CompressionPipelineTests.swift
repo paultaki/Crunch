@@ -5,21 +5,24 @@ import Testing
 
 @Suite("CompressionPipeline")
 struct CompressionPipelineTests {
-    // The cross-volume fix in one deterministic, CI-safe assertion: the
-    // output temp must be created in the directory it was handed, because
-    // that is what makes the caller's `replaceItemAt` a same-volume (and
-    // therefore atomic, and therefore possible) operation. CI has only one
-    // volume, so "same directory as asked" is the invariant that stands in
-    // for "same volume as the user's file".
-    @Test("output temp is staged in the directory the caller handed in, dot-prefixed")
-    func outputIsStagedInGivenDirectory() async throws {
+    // The pipeline half of the cross-volume fix: it must write where the
+    // reservation says and nowhere else, because that is what makes the
+    // caller's `replaceItemAt` a same-volume (and therefore atomic, and
+    // therefore possible) operation. Paired with `StagingAreaTests`, which
+    // proves a reservation for a destination lands on that destination's
+    // volume, this covers the whole path on a single-volume CI machine.
+    @Test("the output temp is written into the reservation it was handed, dot-prefixed")
+    func outputIsStagedInReservedDirectory() async throws {
         let sourceURL = try TestImageFactory.makeSolidPNG(width: 64, height: 64)
         defer { try? FileManager.default.removeItem(at: sourceURL) }
 
-        let staging = FileManager.default.temporaryDirectory
+        let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("crunch-staging-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: staging) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let reservation = try StagingArea.reserve(for: folder.appendingPathComponent("photo.jpg"))
+        defer { StagingArea.release(reservation) }
 
         let file = try #require(ImageFile.load(from: sourceURL))
         let settings = CompressionSettings(outputFormat: .jpeg, resolutionPercent: 100, quality: 80)
@@ -27,15 +30,16 @@ struct CompressionPipelineTests {
         let output = try await CompressionPipeline.run(
             file: file,
             settings: settings,
-            stagingDirectory: staging
+            staging: reservation
         )
         defer { try? FileManager.default.removeItem(at: output.url) }
 
         #expect(
             output.url.deletingLastPathComponent().standardizedFileURL
-                == staging.standardizedFileURL
+                == reservation.directory.standardizedFileURL
         )
-        // Hidden while it sits in what may be the user's own folder.
+        // Hidden, because the fallback rung of a reservation is the user's
+        // own folder.
         #expect(output.url.lastPathComponent.hasPrefix(".crunch-"))
         #expect(FileManager.default.fileExists(atPath: output.url.path))
     }
@@ -95,7 +99,7 @@ struct CompressionPipelineTests {
         let output = try await CompressionPipeline.run(
             file: file,
             settings: settings,
-            stagingDirectory: FileManager.default.temporaryDirectory
+            staging: StagingArea.transient()
         )
         defer { try? FileManager.default.removeItem(at: output.url) }
 
@@ -127,7 +131,7 @@ struct CompressionPipelineTests {
         let output = try await CompressionPipeline.run(
             file: file,
             settings: settings,
-            stagingDirectory: FileManager.default.temporaryDirectory
+            staging: StagingArea.transient()
         )
         defer { try? FileManager.default.removeItem(at: output.url) }
 
@@ -155,7 +159,7 @@ struct CompressionPipelineTests {
         let output = try await CompressionPipeline.run(
             file: file,
             settings: settings,
-            stagingDirectory: FileManager.default.temporaryDirectory
+            staging: StagingArea.transient()
         )
         defer { try? FileManager.default.removeItem(at: output.url) }
 
@@ -181,7 +185,7 @@ struct CompressionPipelineTests {
         let output = try await CompressionPipeline.run(
             file: file,
             settings: settings,
-            stagingDirectory: FileManager.default.temporaryDirectory
+            staging: StagingArea.transient()
         )
         defer { try? FileManager.default.removeItem(at: output.url) }
 
@@ -204,7 +208,7 @@ struct CompressionPipelineTests {
         let avif = try await CompressionPipeline.run(
             file: pngFile,
             settings: CompressionSettings(outputFormat: .avif, resolutionPercent: 100, quality: 80),
-            stagingDirectory: FileManager.default.temporaryDirectory
+            staging: StagingArea.transient()
         )
         defer { try? FileManager.default.removeItem(at: avif.url) }
 
@@ -214,7 +218,7 @@ struct CompressionPipelineTests {
         let webp = try await CompressionPipeline.run(
             file: avifFile,
             settings: CompressionSettings(outputFormat: .webp, resolutionPercent: 100, quality: 80),
-            stagingDirectory: FileManager.default.temporaryDirectory
+            staging: StagingArea.transient()
         )
         defer { try? FileManager.default.removeItem(at: webp.url) }
 
@@ -241,7 +245,7 @@ struct CompressionPipelineTests {
         let output = try await CompressionPipeline.run(
             file: file,
             settings: settings,
-            stagingDirectory: FileManager.default.temporaryDirectory
+            staging: StagingArea.transient()
         )
         defer { try? FileManager.default.removeItem(at: output.url) }
 
