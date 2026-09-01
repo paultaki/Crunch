@@ -2,53 +2,14 @@ import CrunchCore
 import SwiftUI
 
 struct SummaryBarView: View {
-    let fileCount: Int
-    let originalSize: Int64
-    let compressedSize: Int64
-    let reduction: Double
-
-    private var savedBytes: Int64 { max(0, originalSize - compressedSize) }
+    let summary: BatchSummary
 
     var body: some View {
-        HStack(spacing: 20) {
-            metric(
-                label: "Saved",
-                value: savedBytes.formattedBytes,
-                tint: .green,
-                emphasised: true
-            )
-
-            Divider().frame(height: 28).opacity(0.4)
-
-            metric(
-                label: "Original",
-                value: originalSize.formattedBytes,
-                tint: .secondary
-            )
-
-            Image(systemName: "arrow.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-
-            metric(
-                label: "Compressed",
-                value: compressedSize.formattedBytes,
-                tint: .primary
-            )
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(String(format: "%.0f%%", reduction))
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(.green)
-                    .monospacedDigit()
-                    .contentTransition(.numericText(value: reduction))
-                Text("reduction")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                    .tracking(0.5)
+        Group {
+            if summary.hasSuccesses {
+                savingsMetrics
+            } else {
+                failureNotice
             }
         }
         .padding(.horizontal, 22)
@@ -64,6 +25,70 @@ struct SummaryBarView: View {
         )
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
+    }
+
+    /// The normal case: at least one file landed, so there are real bytes to
+    /// report. Every figure comes from the succeeded results only.
+    private var savingsMetrics: some View {
+        HStack(spacing: 20) {
+            metric(
+                label: "Saved",
+                value: summary.savedBytes.formattedBytes,
+                tint: .green,
+                emphasised: true
+            )
+
+            Divider().frame(height: 28).opacity(0.4)
+
+            metric(
+                label: "Original",
+                value: summary.originalSize.formattedBytes,
+                tint: .secondary
+            )
+
+            Image(systemName: "arrow.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+
+            metric(
+                label: "Compressed",
+                value: summary.compressedSize.formattedBytes,
+                tint: .primary
+            )
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(String(format: "%.0f%%", summary.reduction))
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.green)
+                    .monospacedDigit()
+                    .contentTransition(.numericText(value: summary.reduction))
+                Text("reduction")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+            }
+        }
+    }
+
+    /// Nothing succeeded, so there is nothing to celebrate: no green, no
+    /// savings figure, no percentage. Uses the same red the failed result
+    /// rows already use rather than inventing a new failure treatment.
+    private var failureNotice: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            Text("No files were compressed")
+                .font(.body.weight(.semibold))
+            Spacer()
+            Text("\(summary.failedCount) failed")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .frame(height: 34)
     }
 
     @ViewBuilder

@@ -109,21 +109,17 @@ struct ContentView: View {
     // MARK: - Results
 
     private var resultsView: some View {
-        VStack(spacing: 0) {
+        let summary = viewModel.batchSummary
+        return VStack(spacing: 0) {
             HeaderBar(
                 title: "Done",
-                subtitle: "\(viewModel.results.count) file\(viewModel.results.count == 1 ? "" : "s") compressed",
+                subtitle: summary.headline,
                 trailing: { EmptyView() }
             )
 
             ResultsView(results: viewModel.results)
 
-            SummaryBarView(
-                fileCount: viewModel.results.count,
-                originalSize: viewModel.results.reduce(0) { $0 + $1.originalSize },
-                compressedSize: viewModel.totalCompressedSize,
-                reduction: viewModel.totalReduction
-            )
+            SummaryBarView(summary: summary)
 
             Button {
                 withAnimation { viewModel.reset() }

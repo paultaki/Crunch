@@ -66,15 +66,11 @@ final class CompressionViewModel {
         files.reduce(0) { $0 + $1.originalSize }
     }
 
-    var totalCompressedSize: Int64 {
-        results.compactMap(\.compressedSize).reduce(0, +)
-    }
-
-    var totalReduction: Double {
-        let original = results.reduce(Int64(0)) { $0 + $1.originalSize }
-        let compressed = results.compactMap(\.compressedSize).reduce(Int64(0), +)
-        guard original > 0 else { return 0 }
-        return Double(original - compressed) / Double(original) * 100
+    /// Honest totals and outcome counts for the finished batch. The
+    /// arithmetic deliberately lives in `CrunchCore` where tests can reach
+    /// it — see `BatchSummary`.
+    var batchSummary: BatchSummary {
+        BatchSummary(results: results)
     }
 
     /// Loads `urls` off the main thread, skipping duplicates, then appends
