@@ -1,5 +1,28 @@
 # Agent Notes
 
+## 2026-09-01 · claude-code (round 2)
+
+- **Did:** Addressed two independent reviews of the `fix-cross-volume` branch. (1) Replaced
+  round 1's "stage in the destination directory" with `StagingArea`, which uses
+  `.itemReplacementDirectory` to get a private directory on the destination's *volume* but
+  outside the user's folder, with a fallback ladder (replacement dir -> destination dir ->
+  throw) and whole-directory cleanup. Rename fails across volumes, not directories, so round 1
+  was a bigger hammer than needed and leaked image files into folders iCloud/Dropbox/Spotlight
+  watch. (2) Closed a real data-loss hole: `.fileSize` on an empty file is `Optional(0)`, not
+  nil, so a 0-byte output unwrapped cleanly, passed the never-worse guard, and would be
+  delivered onto the user's photo. Now guards `fileSize > 0`; the writability probe is deleted
+  (it had become the hazard it was meant to prevent). (3) Summary bar no longer paints a batch
+  that *grew* the files green. 46 tests, incl. `CompressionJob`'s first direct tests.
+- **Why:** Round 1 fixed the crash but with the wrong staging location, and left the more
+  dangerous bug open.
+- **Next:** Merge `fix-cross-volume` to `main`; re-shoot the demo on the external volume.
+- **Watch out:** `FileManager.url(for: .itemReplacementDirectory, appropriateFor:)` does NOT
+  throw when it can't resolve the volume — it silently returns a *boot-volume* directory, which
+  would reintroduce the cross-device bug with no error anywhere. `StagingArea` verifies the
+  volume identifiers match and falls back rather than trust it. Any future use of that API
+  needs the same check. Also: the staging cleanup obligation is an optional URL, not a bool,
+  because on the fallback rung the staging directory IS the user's folder.
+
 ## 2026-09-01 · claude-code
 
 - **Did:** Fixed two bugs found testing the shipped app on an external drive (branch
