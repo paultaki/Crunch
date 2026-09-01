@@ -42,11 +42,37 @@ enum TestImageFactory {
         return try writePNG(pixels: pixels, width: width, height: height, alphaInfo: .last)
     }
 
+    /// Pseudo-random-noise PNG written to a caller-chosen URL. Noise matters
+    /// for any test that needs compression quality to actually change the
+    /// output size: a flat color encodes to nearly the same bytes at q20 and
+    /// q95, so a solid image can't distinguish "compressed" from "skipped".
+    /// The generator is a fixed-seed LCG, so the bytes are identical on every
+    /// run and every machine.
+    static func writeNoisyPNG(to url: URL, width: Int, height: Int) throws {
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        var seed: UInt64 = 0x2545_F491_4F6C_DD1D
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            pixels[i] = UInt8(truncatingIfNeeded: seed >> 33)
+            pixels[i + 1] = UInt8(truncatingIfNeeded: seed >> 41)
+            pixels[i + 2] = UInt8(truncatingIfNeeded: seed >> 49)
+            pixels[i + 3] = 255
+        }
+        _ = try writePNG(
+            pixels: pixels,
+            width: width,
+            height: height,
+            alphaInfo: .noneSkipLast,
+            destination: url
+        )
+    }
+
     private static func writePNG(
         pixels: [UInt8],
         width: Int,
         height: Int,
-        alphaInfo: CGImageAlphaInfo
+        alphaInfo: CGImageAlphaInfo,
+        destination: URL? = nil
     ) throws -> URL {
         let bytesPerRow = width * 4
         let data = Data(pixels)
@@ -71,10 +97,10 @@ enum TestImageFactory {
             throw TestImageError.cannotCreateImage
         }
 
-        let tempURL = FileManager.default.temporaryDirectory
+        let tempURL = destination ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("crunch-test-\(UUID().uuidString).png")
 
-        guard let destination = CGImageDestinationCreateWithURL(
+        guard let imageDestination = CGImageDestinationCreateWithURL(
             tempURL as CFURL,
             UTType.png.identifier as CFString,
             1,
@@ -83,9 +109,9 @@ enum TestImageFactory {
             throw TestImageError.cannotCreateDestination
         }
 
-        CGImageDestinationAddImage(destination, cgImage, nil)
+        CGImageDestinationAddImage(imageDestination, cgImage, nil)
 
-        guard CGImageDestinationFinalize(destination) else {
+        guard CGImageDestinationFinalize(imageDestination) else {
             throw TestImageError.cannotFinalize
         }
 
