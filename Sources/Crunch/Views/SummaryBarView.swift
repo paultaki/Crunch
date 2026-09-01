@@ -34,7 +34,7 @@ struct SummaryBarView: View {
             metric(
                 label: "Saved",
                 value: summary.savedBytes.formattedBytes,
-                tint: .green,
+                tint: summary.reduction >= 0 ? .green : .secondary,
                 emphasised: true
             )
 
@@ -58,18 +58,36 @@ struct SummaryBarView: View {
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(String(format: "%.0f%%", summary.reduction))
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(.green)
-                    .monospacedDigit()
-                    .contentTransition(.numericText(value: summary.reduction))
-                Text("reduction")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                    .tracking(0.5)
-            }
+            headlineBadge
+        }
+    }
+
+    /// `BatchSummary.reduction` goes negative on an all-success batch of
+    /// format conversions that grew the files, so the figure can't be painted
+    /// green and captioned "reduction" unconditionally — that renders "Saved
+    /// Zero KB" beside a green "-50% REDUCTION". Branches on sign exactly the
+    /// way `ResultRowView` already does per row: orange, framed as growth.
+    @ViewBuilder
+    private var headlineBadge: some View {
+        if summary.reduction >= 0 {
+            badge(String(format: "%.0f%%", summary.reduction), caption: "reduction", tint: .green)
+        } else {
+            badge(String(format: "+%.0f%%", -summary.reduction), caption: "growth", tint: .orange)
+        }
+    }
+
+    private func badge(_ value: String, caption: String, tint: Color) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(value)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(tint)
+                .monospacedDigit()
+                .contentTransition(.numericText(value: summary.reduction))
+            Text(caption)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .tracking(0.5)
         }
     }
 
