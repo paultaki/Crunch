@@ -1,5 +1,25 @@
 # Agent Notes
 
+## 2026-09-02 · claude-code
+
+- **Did:** Published the repo to GitHub as **public** at `paultaki/Crunch` and pushed `main`
+  (25 commits). Pre-flight before going public: `git grep` for credential patterns and
+  `/Users/paul` paths over all tracked content (clean), confirmed `.gitignore` keeps `.build/`,
+  `dist/`, `.remember/`, `.superpowers/`, and `.DS_Store` out, and re-ran the suite: 46 tests
+  in 10 suites, all green. First CI run on `macos-15` passed in 45s. Added the description and
+  eight topics (macos, swift, swiftui, image-compression, image-optimization, webp, avif,
+  pngquant).
+- **Why:** Last remaining launch item. The demo GIF landed in b682189, so the repo had nothing
+  left blocking a public push.
+- **Next:** Manual QA of the built `dist/Crunch.app` on a real photo folder (still unticked from
+  the 08-30 launch checklist). Consider a tagged release with a zipped `.app` so people can try
+  it without building.
+- **Watch out:** The README CI badge hardcodes `paultaki/Crunch`, so renaming the repo silently
+  breaks it. CI logs one deprecation annotation: `actions/checkout@v4` targets Node.js 20 and is
+  being force-run on Node 24, harmless today, bump to `@v5` when convenient. The app is only
+  ad-hoc signed and not notarized, so anyone downloading a prebuilt binary hits Gatekeeper.
+
+
 ## 2026-09-01 · claude-code (round 2)
 
 - **Did:** Addressed two independent reviews of the `fix-cross-volume` branch. (1) Replaced
