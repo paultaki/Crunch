@@ -5,16 +5,14 @@
 
 Native, offline, drag-and-drop image compression for the Mac. Squoosh-class savings, ImageOptim simplicity, native SwiftUI.
 
-<!-- demo.gif: drag files in → watch estimate → compress -->
-
-See `docs/recording-notes.md` for exactly what to capture.
+![Eight images dragged into Crunch and compressed 83 percent smaller, with the originals preserved in an Uncompressed Backup folder](demo.gif)
 
 ## Features
 
 - Drag and drop a batch of images and compress them all at once.
 - Live size estimate before you commit: it runs a real file through the actual compression pipeline (not a guess) and extrapolates to the batch, debounced and cached so dragging a slider stays smooth.
 - Compression runs in parallel, bounded to your CPU core count, with working cancellation mid-batch.
-- Originals are copied to an `Uncompressed Backup` folder next to the source files before anything is overwritten.
+- Compressed files land in place, keeping their original names and folder, so nothing downstream has to be re-linked or renamed. Before any of that happens the untouched originals are preserved in an `Uncompressed Backup` folder alongside them. No exporting to a second folder, no swapping files back by hand, no `photo-compressed-final.png`.
 - Never makes a file worse: if the compressed output isn't smaller than the original, the original is left alone and the result is reported as "Already optimized." Explicit format conversions (say, PNG to WebP) always deliver, even if the converted file happens to be larger.
 - PNG, JPEG, WebP, and AVIF, including conversion between the four and resolution scaling.
 - AVIF output via ImageIO, no external tools. It is offered only when this Mac's ImageIO can actually encode it, checked at runtime. AVIF input decodes everywhere macOS 15 does.
