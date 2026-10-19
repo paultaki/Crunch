@@ -1,5 +1,41 @@
 # Agent Notes
 
+## 2026-10-19 · claude-code (concurrent drop ingestion)
+
+- **Did:** Made drop ingestion concurrent and order-preserving. `ImageFile.loadBatch(from:)`
+  is new in `CrunchCore`: it decodes a batch in a task group where each child writes its own
+  index-keyed slot, so results come back in the order they were given even though they finish
+  out of order. `CompressionViewModel.addFiles` now strides the deduped URLs in batches of 32
+  and appends each batch as it lands, so a big folder fills the list progressively instead of
+  showing nothing until the last thumbnail decodes. Measured on this Mac (32 cores, best of
+  three, page cache warm, real `ImageFile.load`): 60 files at 2000x1500 **549 ms -> 32 ms
+  (17.2x)**, 300 files **2749 ms -> 171 ms (16.1x)**, 64 photo-sized 4032x3024 files
+  **2319 ms -> 119 ms (19.5x)**. First rows now land at ~18 ms on the 300-file drop instead of
+  at the 2.7 s mark. 49 tests in 11 suites green (46 before, plus 3 for `loadBatch`).
+- **Why:** The old comment claimed "the thumbnail work is cheap enough that parallelism isn't
+  worth the reorder cost". Measurement says otherwise, and the reorder cost is one array of
+  optionals. 31 of 32 cores sat idle while the user waited on a folder drop.
+- **Next:** **Part 2 of this task is NOT done and is deliberately deferred** — removing the
+  resize disk round trip (`ImageResizer.resize` encodes a throwaway lossless PNG to the system
+  temp dir, ~8.7 MB per resized photo, which the next compressor immediately re-decodes; also
+  the one staging path that ignores the `StagingArea` volume rule and lands on the boot volume
+  even when the user's files are on an external drive). It edits the same four compressors a
+  sibling session is changing for EXIF/ICC metadata preservation
+  (branch `claude/objective-visvesvaraya-4d3c56`, in flight, 0 commits ahead of main at the
+  time of writing). Pick it up after that work merges. Prior measurement: 110 ms -> 22 ms on a
+  4032x3024 JPEG resized 50% then compressed to JPEG q80.
+- **Watch out:** Three things that look like tidy-ups but are not. (1) The index-keyed slot
+  array in `loadBatch` is the ordering guarantee — `Tests/CrunchTests/ImageFileLoadBatchTests.swift`
+  fails on an append-as-completed rewrite, verified by actually breaking it. (2)
+  `loadBatchSize` must stay `nonisolated`: `CompressionViewModel` is `@MainActor`, which
+  isolates even its immutable statics, and the detached loop cannot read it otherwise. (3)
+  `addFiles` now calls `appendLoaded` once per batch rather than once per drop, so
+  `requestEstimate` fires up to one call per batch; that is safe only because `requestEstimate`
+  cancels the previous task and debounces 400 ms, which coalesces them into one estimate.
+  Also: committed on `claude/unruffled-jepsen-1fb9a1`, **not pushed and not merged to `main`**. The 32 batch size was tuned on a 32-core Mac; a 4-core machine will see a smaller
+  multiple, never a worse one than serial.
+
+
 ## 2026-09-02 · claude-code
 
 - **Did:** Published the repo to GitHub as **public** at `paultaki/Crunch` and pushed `main`
