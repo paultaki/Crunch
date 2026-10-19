@@ -1,5 +1,36 @@
 # Agent Notes
 
+## 2026-10-19 · claude-code
+
+- **Did:** Source + benchmark audit of the whole app (no code changed). Produced a ranked
+  top-10 improvement roadmap across delight / performance / efficiency / simplicity. Four
+  measurements taken on this Mac (32 cores, APFS): resize-to-JPEG of a 12 MP photo is
+  **110 ms via the current PNG-temp round trip vs 22 ms in memory (5x)**, with an **8.7 MB
+  throwaway lossless PNG per resized file**; `addFiles` thumbnail ingestion is **1116 ms
+  sequential vs 70 ms concurrent for 60 files (16x)**, extrapolating to **9.3 s vs 0.6 s for
+  a 500-file drop**. Suite re-run green: 46/46.
+- **Why:** Asked for the highest-value remaining improvements. Everything is cited to file
+  and line so the fixes can be picked up without re-deriving them.
+- **CONFIRMED BUG (reproduced, highest priority):** `JPEGCompressor` and `AVIFCompressor`
+  decode to a bare `CGImage` and write it with only a quality key, so **all source metadata
+  is discarded**. A probe built a JPEG with `Orientation 6` + EXIF and ran the exact calls at
+  `JPEGCompressor.swift:9-28`: orientation, `DateTimeOriginal`, `UserComment` and TIFF `Make`
+  all came back `ABSENT`. Practical effect: **a phone photo stored as landscape pixels plus an
+  orientation tag comes out of Crunch visually rotated 90 degrees**, and capture date / camera /
+  GPS are gone. `grep -rn "kCGImageProperty|Orientation|Exif" Sources/` finds no handling
+  anywhere. Fix: pass `CGImageSourceCopyPropertiesAtIndex` into `CGImageDestinationAddImage`,
+  add `-metadata all` to the `cwebp` args, then offer an explicit strip-metadata toggle.
+- **Next:** Fix the metadata bug first with a per-format round-trip test. Then the two measured
+  perf items (return a `CGImage` from `ImageResizer`; concurrent order-preserving ingestion).
+  Then `CFBundleDocumentTypes` + `NSServices` + `@AppStorage`, which is the biggest reach win.
+- **Watch out:** Two plausible-sounding changes are **wrong** and should not be made.
+  (1) `FileManager.copyItem` **already APFS-clones** — 40 x 5 MB copied in 6 ms consuming ~0 MB,
+  so there is no win in switching `BackupService` to `clonefile(2)`; the backup issue is clutter
+  and missing restore, not speed. (2) `ToolChecker`'s no-cache re-stat measured **0.007 ms** per
+  compression over a 32-entry `PATH`; the "effectively free" comment is accurate, leave it alone.
+  Also: the `cwebp` metadata claim is inferred from its documented default, not reproduced —
+  probe it before fixing. Roadmap: https://claude.ai/artifact/Ue6MWG2k3XPiN6zWQ9rj4i
+
 ## 2026-09-02 · claude-code
 
 - **Did:** Published the repo to GitHub as **public** at `paultaki/Crunch` and pushed `main`
