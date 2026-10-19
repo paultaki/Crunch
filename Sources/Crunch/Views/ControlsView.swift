@@ -51,6 +51,27 @@ struct ControlsView: View {
                     step: 1
                 )
             }
+
+            // Phrased as what it removes rather than as "preserve metadata",
+            // so an untouched control is the safe one: off means nothing is
+            // thrown away. The footnote names GPS specifically because that
+            // is the reason anyone reaches for this, and says what is kept so
+            // nobody expects their photos to come out sideways.
+            controlBlock(title: "Metadata") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Strip metadata", isOn: $settings.stripMetadata)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                    Text(
+                        settings.stripMetadata
+                            ? "Removes capture date, camera and GPS. Orientation is kept."
+                            : "Keeps capture date, camera, GPS and orientation."
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)

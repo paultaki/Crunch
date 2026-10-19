@@ -1,6 +1,42 @@
 # Agent Notes
 
-## 2026-10-19 · claude-code
+## 2026-10-19 · claude-code — metadata preservation fix
+
+- **Did:** Fixed the metadata data-loss bug written up as audit item 01 — Crunch discarded
+  **all** image metadata on every compression, so capture date, camera, GPS and EXIF
+  orientation vanished and a phone photo came out visibly rotated 90°. Each format lost it for
+  a different reason, so each needed a different fix. New `ImageMetadata` reads the preserved
+  dictionaries (Exif/ExifAux/TIFF/GPS/IPTC + Orientation) off the user's original and merges
+  them into the ImageIO destination options for JPEG and AVIF. cwebp strips by documented
+  default, so WebP now passes `-metadata all`. pngquant on macOS strips by default *and has no
+  flag to stop it* (`--help`: "remove optional metadata (default on Mac)"), so new
+  `PNGMetadataWriter` splices a freshly-minted `eXIf` chunk into pngquant's finished output by
+  chunk surgery — no re-encode, IDAT untouched, output actually ends up smaller because the
+  bulky XMP chunk goes away. New `OrientationBaker` handles the one case no tag can cover:
+  ImageIO's AVIF encoder discards orientation unconditionally, so AVIF rotates the pixels
+  instead. Added the `stripMetadata` setting and a "Strip metadata" toggle in `ControlsView`,
+  defaulting to preserve. 66 tests (was 46), all green.
+- **Why:** Silent, unrecoverable data loss on every single run, with a visible symptom
+  (rotation) that most users would blame on their phone.
+- **Next:** The original audit's remaining items. Worth considering whether `ImageFile` should
+  expose orientation-corrected dimensions — the UI's thumbnail honours orientation but
+  `pixelWidth`/`pixelHeight` are raw, so the resolution percentages describe the stored buffer
+  rather than the photo as displayed. Not wrong today, just inconsistent.
+- **Watch out:** Metadata is threaded from `file.url` (**the user's original**), never from the
+  compressor's input, and this is load-bearing rather than stylistic — under a resize the
+  pipeline hands the compressor an `ImageResizer` temp with no metadata at all, so the naive
+  "read it from the input" fix preserves everything at 100% resolution and silently loses it at
+  99%. There is a test that fails specifically on that mistake. Two more traps: a placeholder
+  used to mint an `eXIf` payload must match the OUTPUT's dimensions, because ImageIO stamps the
+  EXIF pixel-dimension tags from whatever image it writes (a 1x1 placeholder yields a payload
+  claiming 1x1); and `CGImageDestinationCopyImageSource` is the wrong tool here despite looking
+  right — it swaps metadata on *already-encoded* bytes and so cannot apply a quality, which is
+  the entire job. Stripping deliberately keeps orientation: it is a rendering instruction, not
+  information about the user, and dropping it just returns sideways photos. For WebP that costs
+  a lossless-PNG normalize hop (measured 1.5s -> 2.5s on a 4032x3024 photo) because cwebp
+  copies metadata wholesale or not at all — but only when stripping a non-upright source.
+
+## 2026-10-19 · claude-code — source and benchmark audit
 
 - **Did:** Source + benchmark audit of the whole app (no code changed). Produced a ranked
   top-10 improvement roadmap across delight / performance / efficiency / simplicity. Four

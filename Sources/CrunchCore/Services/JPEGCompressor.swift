@@ -3,7 +3,17 @@ import ImageIO
 import UniformTypeIdentifiers
 
 enum JPEGCompressor {
-    static func compress(input: URL, output: URL, quality: Int) async throws {
+    /// `metadata` comes from the user's ORIGINAL file, never from `input` —
+    /// under a resize, `input` is an intermediate written by `ImageResizer`
+    /// that carries none of it. Nil means the user asked for metadata to be
+    /// stripped, which here is simply the absence of anything to merge: an
+    /// ImageIO destination writes only what it is given.
+    static func compress(
+        input: URL,
+        output: URL,
+        quality: Int,
+        metadata: ImageMetadata?
+    ) async throws {
         let qualityFloat = Double(quality) / 100.0
 
         guard let imageSource = CGImageSourceCreateWithURL(input as CFURL, nil),
@@ -21,11 +31,12 @@ enum JPEGCompressor {
             throw CompressionError.cannotWriteImage(output.lastPathComponent)
         }
 
-        let options: [CFString: Any] = [
-            kCGImageDestinationLossyCompressionQuality: qualityFloat
-        ]
+        let options = ImageMetadata.destinationOptions(
+            metadata: metadata,
+            quality: qualityFloat
+        )
 
-        CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
+        CGImageDestinationAddImage(destination, cgImage, options)
 
         guard CGImageDestinationFinalize(destination) else {
             throw CompressionError.cannotWriteImage(output.lastPathComponent)
