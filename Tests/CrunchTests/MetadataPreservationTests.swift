@@ -233,11 +233,9 @@ struct MetadataPreservationTests {
     // metadata test above while looking wrong on screen.
     @Test(
         "a sideways-stored photo renders the same way up after compression",
-        arguments: [OutputFormat.jpeg, .png, .webp, .avif]
+        arguments: MetadataPreservationTests.encodableFormats
     )
     func renderedAppearanceSurvivesCompression(outputFormat: OutputFormat) async throws {
-        try requireTooling(for: outputFormat)
-
         // JPEG source for every case: it is what a phone actually hands over,
         // and the only fixture format that reliably carries orientation in.
         let source = try TestImageFactory.makeMarkerImageWithMetadata(format: .jpeg)
@@ -259,11 +257,9 @@ struct MetadataPreservationTests {
     // compressor's input is an intermediate carrying no metadata at all.
     @Test(
         "a sideways-stored photo renders the same way up after being resized too",
-        arguments: [OutputFormat.jpeg, .png, .webp, .avif]
+        arguments: MetadataPreservationTests.encodableFormats
     )
     func renderedAppearanceSurvivesResize(outputFormat: OutputFormat) async throws {
-        try requireTooling(for: outputFormat)
-
         let source = try TestImageFactory.makeMarkerImageWithMetadata(format: .jpeg)
         defer { try? FileManager.default.removeItem(at: source) }
 
@@ -278,11 +274,9 @@ struct MetadataPreservationTests {
     // history and not its orientation.
     @Test(
         "a sideways-stored photo renders the same way up even when stripped",
-        arguments: [OutputFormat.jpeg, .png, .webp, .avif]
+        arguments: MetadataPreservationTests.encodableFormats
     )
     func renderedAppearanceSurvivesStripping(outputFormat: OutputFormat) async throws {
-        try requireTooling(for: outputFormat)
-
         let source = try TestImageFactory.makeMarkerImageWithMetadata(format: .jpeg)
         defer { try? FileManager.default.removeItem(at: source) }
 
@@ -395,22 +389,28 @@ struct MetadataPreservationTests {
 
     // MARK: - Helper
 
-    /// Skips a parameterized case when this machine lacks the encoder it
-    /// needs, matching the `.enabled(if:)` conditions used on the
-    /// single-format tests above. `arguments:` cannot carry a per-case
-    /// condition, so the check moves inside.
-    private func requireTooling(for outputFormat: OutputFormat) throws {
-        switch outputFormat {
-        case .png:
-            try #require(ToolChecker.pngquantPath != nil, "pngquant not installed")
-        case .webp:
-            try #require(ToolChecker.cwebpPath != nil, "cwebp not installed")
-        case .avif:
-            try #require(OutputFormat.avifEncodingSupported, "no AVIF encoder")
-        case .same, .jpeg:
-            break
-        }
-    }
+    /// The output formats this machine can actually produce, used as the
+    /// `arguments:` of the parameterized tests above so an unavailable
+    /// encoder yields no case at all.
+    ///
+    /// This replaced a guard inside the test bodies that called
+    /// `#require(ToolChecker.pngquantPath != nil)` and friends. That looked
+    /// like the `.enabled(if:)` conditions on the single-format tests but is
+    /// not equivalent: `#require` RECORDS AN ISSUE and throws, it does not
+    /// skip. Locally every encoder is installed so all four cases passed; on
+    /// CI, where pngquant is absent and ImageIO cannot encode AVIF, the same
+    /// guard turned two unavailable formats into six red tests. Filtering the
+    /// arguments is the only way to express "do not run this case" for a
+    /// parameterized test — Swift Testing has no runtime skip.
+    ///
+    /// JPEG is unconditional: ImageIO encodes it everywhere, no external tool.
+    static let encodableFormats: [OutputFormat] = {
+        var formats: [OutputFormat] = [.jpeg]
+        if ToolChecker.pngquantPath != nil { formats.append(.png) }
+        if ToolChecker.cwebpPath != nil { formats.append(.webp) }
+        if OutputFormat.avifEncodingSupported { formats.append(.avif) }
+        return formats
+    }()
 
     private func compress(
         _ source: URL,

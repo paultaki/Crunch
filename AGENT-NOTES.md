@@ -1,5 +1,36 @@
 # Agent Notes
 
+## 2026-10-19 · claude-code — resize landed, and a CI-only test failure
+
+- **Did:** Merged the resize work (`d7c5597`, fast-forward) and pushed. Then found CI had
+  been **red since `f10f4fd`** and fixed it.
+- **Verified the resize change independently** before merging, with a probe compiled against
+  the branch's own sources: a sideways-stored 400x800 JPEG (orientation 6 + EXIF + GPS) run
+  through `CompressionPipeline` at 50% came out correctly landscape at 400x200 with all four
+  tags intact, for **all four formats**, and the strip case dropped the tags while keeping the
+  photo upright. Re-measured by the executing session: JPEG @50% 293ms → 56ms (5.3x), AVIF
+  376 → 131 (2.9x), PNG unchanged because pngquant needs a real file on disk.
+- **THE CI TRAP — worth internalising:** `#require` inside a **parameterized** test
+  (`@Test(arguments:)`) **records an issue and throws. It does not skip.** The metadata suite
+  had a `requireTooling(for:)` helper whose doc comment said "Skips a parameterized case" and
+  which called `#require(ToolChecker.pngquantPath != nil)`. Locally every encoder is installed,
+  so all four cases passed and it looked correctly gated — I checked it and wrongly cleared it.
+  On the GitHub runner, where pngquant is absent and ImageIO cannot encode AVIF, the same
+  guard turned two unavailable formats into **six red tests**. `.enabled(if:)` genuinely skips,
+  but it is per-test and cannot see a per-case argument. **Filtering the `arguments:` array is
+  the only way to express "do not run this case"** — Swift Testing has no runtime skip. Fixed
+  with a `MetadataPreservationTests.encodableFormats` static that appends .png/.webp/.avif only
+  when their encoder exists.
+- **Why:** A green local suite is not evidence about CI whenever a test's behaviour depends on
+  an external tool. Verify by simulation, not by inference — forcing the list to JPEG-only
+  reproduced the CI machine and showed the suite green.
+- **Next:** Confirm the CI run on this push goes green. Remaining audit items are PAU-90
+  (Finder integration / AppStorage / notarize, the biggest reach win), PAU-91, PAU-92,
+  PAU-93, PAU-94, PAU-95.
+- **Watch out:** `swift test` passing on this Mac says nothing about the runner for any test
+  touching pngquant, cwebp or AVIF. CI has none of them. Before trusting a green local run on
+  a tool-dependent test, force the availability check false and re-run.
+
 ## 2026-10-19 · claude-code (resize round trip removed)
 
 - **Did:** `ImageResizer.resize` now returns a `CGImage` instead of writing a lossless PNG to the
