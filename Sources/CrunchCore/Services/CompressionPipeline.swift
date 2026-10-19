@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// The single resize → compress orchestration shared by the real compression
@@ -33,11 +34,11 @@ public enum CompressionPipeline {
     ///
     /// The pipeline never reads or writes `file.url` itself beyond decoding
     /// it — callers are responsible for moving the returned temp into place
-    /// or deleting it. All intermediate temps (e.g. a resize pass) are
-    /// cleaned up here via `defer`, on both success and throw; the returned
-    /// `Output` temp is cleaned up on throw too (there's no way for the
-    /// caller to reach it), but left in place on success for the caller to
-    /// own.
+    /// or deleting it. Any intermediate temp — now only the PNG path's, see
+    /// the `.png` case — is cleaned up here via `defer`, on both success and
+    /// throw; the returned `Output` temp is cleaned up on throw too (there's
+    /// no way for the caller to reach it), but left in place on success for
+    /// the caller to own.
     public static func run(
         file: ImageFile,
         settings: CompressionSettings,
@@ -93,50 +94,76 @@ public enum CompressionPipeline {
             }
         }
 
-        // cwebp resizes natively; every other output format resizes via
-        // ImageResizer first, which always emits a lossless PNG regardless
-        // of source format (see ImageResizer.resize doc comment for why).
+        // cwebp resizes natively; every other output format resizes here.
+        // The result stays in memory — it used to be encoded to a lossless
+        // PNG temp and immediately re-decoded by the compressor below, which
+        // cost more than the entire rest of the operation. See
+        // `ImageResizer.resize`.
         let needsManualResize = resize != nil && outputFormat != .webp
-        let compressionInput: URL
+        let resizedImage: CGImage?
         if needsManualResize, let resize {
-            let resized = try await ImageResizer.resize(
+            resizedImage = try ImageResizer.resize(
                 input: file.url,
                 width: resize.0,
-                height: resize.1,
-                outputFormat: outputFormat
+                height: resize.1
             )
-            resizedTemp = resized
-            compressionInput = resized
         } else {
-            compressionInput = file.url
+            resizedImage = nil
+        }
+
+        // The pixels the ImageIO encoders are given: the resize result when
+        // there is one, otherwise the original decoded here. Decoding at this
+        // level rather than inside each compressor is what lets a resize stay
+        // in memory, and it is lazy — at 100% resolution for PNG or WebP this
+        // is never called, so nothing is decoded that nobody needs.
+        func imageIOPixels() throws -> CGImage {
+            if let resizedImage { return resizedImage }
+            return try ImageDecoder.decode(file.url)
         }
 
         switch outputFormat {
         case .png:
+            // pngquant is the holdout: it decodes PNG files through libpng
+            // and cannot be handed pixels, so this is the one path where a
+            // resize must still materialize an intermediate on disk. At 100%
+            // there is nothing to materialize and the user's own file goes
+            // straight in.
+            let pngInput: URL
+            if let resizedImage {
+                let temp = try ImageNormalizer.encodeAsPNG(from: resizedImage, metadata: nil)
+                resizedTemp = temp
+                pngInput = temp
+            } else {
+                pngInput = file.url
+            }
             try await PNGCompressor.compress(
-                input: compressionInput,
+                input: pngInput,
                 output: tempOutput,
                 quality: quality,
                 metadata: metadata
             )
         case .jpeg:
+            let jpegPixels = try imageIOPixels()
             try await JPEGCompressor.compress(
-                input: compressionInput,
+                image: jpegPixels,
                 output: tempOutput,
                 quality: quality,
                 metadata: metadata
             )
         case .webp:
+            // Always the user's original: WebP never takes the resize branch
+            // above, because cwebp does its own resizing from the source.
             try await WebPCompressor.compress(
-                input: compressionInput,
+                input: file.url,
                 output: tempOutput,
                 quality: quality,
                 resize: resize,
                 metadata: metadata
             )
         case .avif:
+            let avifPixels = try imageIOPixels()
             try await AVIFCompressor.compress(
-                input: compressionInput,
+                image: avifPixels,
                 output: tempOutput,
                 quality: quality,
                 metadata: metadata

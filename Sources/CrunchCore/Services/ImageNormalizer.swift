@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -28,12 +29,20 @@ enum ImageNormalizer {
     ///
     /// The caller owns the returned file and must delete it.
     static func encodeAsPNG(from source: URL, metadata: ImageMetadata?) throws -> URL {
-        guard let imageSource = CGImageSourceCreateWithURL(source as CFURL, nil),
-              let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
-        else {
-            throw CompressionError.cannotReadImage(source.lastPathComponent)
-        }
+        try encodeAsPNG(from: ImageDecoder.decode(source), metadata: metadata)
+    }
 
+    /// Writes already-decoded pixels out as a lossless PNG temp.
+    ///
+    /// This is the resize path's one remaining exit to disk. `ImageResizer`
+    /// hands back a `CGImage` precisely so nothing has to go through a file,
+    /// but pngquant decodes PNG files through libpng and cannot be given
+    /// pixels, so the PNG output format alone still needs the intermediate
+    /// written. Lossless, so the only generation of loss is the quantization
+    /// the user asked for.
+    ///
+    /// The caller owns the returned file and must delete it.
+    static func encodeAsPNG(from image: CGImage, metadata: ImageMetadata?) throws -> URL {
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(UUID().uuidString).png")
 
@@ -46,7 +55,7 @@ enum ImageNormalizer {
             throw CompressionError.cannotWriteImage(tempURL.lastPathComponent)
         }
 
-        CGImageDestinationAddImage(destination, cgImage, metadata?.properties as CFDictionary?)
+        CGImageDestinationAddImage(destination, image, metadata?.properties as CFDictionary?)
 
         guard CGImageDestinationFinalize(destination) else {
             throw CompressionError.cannotWriteImage(tempURL.lastPathComponent)

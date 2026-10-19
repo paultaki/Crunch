@@ -1,26 +1,31 @@
+import CoreGraphics
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
 enum JPEGCompressor {
-    /// `metadata` comes from the user's ORIGINAL file, never from `input` —
-    /// under a resize, `input` is an intermediate written by `ImageResizer`
-    /// that carries none of it. Nil means the user asked for metadata to be
-    /// stripped, which here is simply the absence of anything to merge: an
-    /// ImageIO destination writes only what it is given.
+    /// Takes already-decoded pixels rather than a file, because under a
+    /// resize they come straight from `ImageResizer` and never touch the
+    /// disk. `CompressionPipeline` decodes the original when there is no
+    /// resize, so this does no reading at all.
+    ///
+    /// `metadata` comes from the user's ORIGINAL file. That used to be a rule
+    /// a reader had to take on trust — the obvious-looking shortcut was to
+    /// source it from `input`, which under a resize was a bare intermediate
+    /// carrying none of it, so metadata survived at 100% resolution and
+    /// vanished at 99%. Now there is no input file here to be tempted by,
+    /// which is a better guarantee than a comment.
+    ///
+    /// Nil means the user asked for metadata to be stripped, which here is
+    /// simply the absence of anything to merge: an ImageIO destination writes
+    /// only what it is given.
     static func compress(
-        input: URL,
+        image: CGImage,
         output: URL,
         quality: Int,
         metadata: ImageMetadata?
     ) async throws {
         let qualityFloat = Double(quality) / 100.0
-
-        guard let imageSource = CGImageSourceCreateWithURL(input as CFURL, nil),
-              let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
-        else {
-            throw CompressionError.cannotReadImage(input.lastPathComponent)
-        }
 
         guard let destination = CGImageDestinationCreateWithURL(
             output as CFURL,
@@ -36,7 +41,7 @@ enum JPEGCompressor {
             quality: qualityFloat
         )
 
-        CGImageDestinationAddImage(destination, cgImage, options)
+        CGImageDestinationAddImage(destination, image, options)
 
         guard CGImageDestinationFinalize(destination) else {
             throw CompressionError.cannotWriteImage(output.lastPathComponent)

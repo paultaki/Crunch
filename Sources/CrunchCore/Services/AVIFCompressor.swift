@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import ImageIO
 
@@ -11,8 +12,8 @@ import ImageIO
 /// that can decode but not encode AVIF. Guarding here, rather than only at
 /// the picker, keeps that path a clear error instead of a raw ImageIO nil.
 enum AVIFCompressor {
-    /// `metadata` comes from the user's ORIGINAL file, never from `input` —
-    /// see `JPEGCompressor.compress` for why.
+    /// Takes already-decoded pixels for the same reason `JPEGCompressor`
+    /// does, and `metadata` likewise comes from the user's ORIGINAL file.
     ///
     /// AVIF is the one format where orientation cannot ride along as a tag:
     /// ImageIO's AVIF encoder forces it to 1 regardless of what it is handed
@@ -21,7 +22,7 @@ enum AVIFCompressor {
     /// it twice. Everything else — capture date, camera, GPS — does survive
     /// as ordinary metadata.
     static func compress(
-        input: URL,
+        image: CGImage,
         output: URL,
         quality: Int,
         metadata: ImageMetadata?
@@ -32,14 +33,21 @@ enum AVIFCompressor {
 
         let qualityFloat = Double(quality) / 100.0
 
-        guard let imageSource = CGImageSourceCreateWithURL(input as CFURL, nil),
-              let decoded = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
-        else {
-            throw CompressionError.cannotReadImage(input.lastPathComponent)
-        }
-
+        // Under a resize this is a second redraw of the same pixels, the
+        // first being the resize itself, and folding the orientation
+        // transform into that one draw was considered and rejected. Measured
+        // on a 4032x3024 photo at 50%: AVIF costs 119 ms with an upright
+        // source and 129 ms with an orientation-6 one, so the extra draw is
+        // ~10 ms of ~129 ms. Buying that back means teaching `ImageResizer`
+        // about orientation and then telling this function its pixels arrived
+        // pre-baked — orientation logic spread across three files, and a
+        // resize that silently does two different things. Not worth 8%.
+        //
+        // Without a resize the bake is unavoidable and much dearer (a full
+        // 12MP redraw, 174 ms -> ~290 ms), since there is no other draw to
+        // fold it into.
         let orientation = metadata?.orientation ?? 1
-        let cgImage = OrientationBaker.bake(decoded, orientation: orientation) ?? decoded
+        let cgImage = OrientationBaker.bake(image, orientation: orientation) ?? image
         let uprightMetadata = OrientationBaker.isUpright(orientation)
             ? metadata
             : metadata?.markedUpright()

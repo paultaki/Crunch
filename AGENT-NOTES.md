@@ -1,5 +1,47 @@
 # Agent Notes
 
+## 2026-10-19 · claude-code (resize round trip removed)
+
+- **Did:** `ImageResizer.resize` now returns a `CGImage` instead of writing a lossless PNG to the
+  system temp directory and returning its URL, and `JPEGCompressor`/`AVIFCompressor` take
+  already-decoded pixels. `CompressionPipeline` decodes once at its own level (`imageIOPixels()`)
+  and hands the same image to either encoder. pngquant cannot be given pixels, so the PNG path
+  alone still materialises an intermediate, via a new
+  `ImageNormalizer.encodeAsPNG(from: CGImage, metadata:)`; the `.png` case says why in a comment.
+  WebP is untouched — `cwebp -resize` still works from the original. Also extracted
+  `ImageDecoder.decode`, which replaces four copies of the same `CGImageSource` dance.
+  Re-measured on current `main` (4032x3024 photo, 10 distinct files per run, mean per file,
+  before/after binaries run alternately so noise could not favour either):
+  **JPEG @50% 293 ms -> 56 ms (5.3x)**, **AVIF @50% 376 ms -> 131 ms (2.9x)**,
+  PNG @50% unchanged (~930 ms, pngquant dominates), JPEG and AVIF @100% unchanged within noise.
+  Also removes **6.2 MB of throwaway boot-volume writes per resized photo** on the JPEG and AVIF
+  paths. 70 tests green, clean `swift build -c release`.
+- **Why:** The intermediate PNG was encoded, written, and immediately re-decoded by the next
+  compressor — 203 ms to write plus 43 ms to read back, against 68 ms for all the real
+  decode-draw-encode work combined. The lossless reasoning behind it was correct and is preserved
+  in the doc comment; the intermediate just never needed to touch disk. It was also the last
+  staging path that ignored the `StagingArea` volume rule, writing to the boot volume even when
+  the user's photos were on an external drive. Pixels in memory have no volume, so that is fixed
+  by deletion rather than by another rung on the ladder.
+- **Next:** Nothing outstanding on this. If PNG resizing ever becomes a bottleneck, the remaining
+  intermediate is the thing to attack, but pngquant's libpng input is the constraint, not our code.
+- **Watch out:** The metadata invariant is the thing to protect here. `CompressionPipeline` reads
+  `ImageMetadata` from `file.url` **before** any intermediate exists and threads it as a value;
+  the compressors no longer receive an input file at all, so the old failure mode (sourcing
+  metadata from the compressor's input, which worked at 100% and silently lost everything at 99%)
+  is now structurally impossible rather than merely commented against. Verified independently of
+  the suite: an orientation-6 photo with date, camera and GPS was pushed through all four output
+  formats at 100% and 50% and the output read back — identical results at both resolutions, and
+  strip mode still reduces to orientation only. **Rejected on purpose:** folding AVIF's
+  `OrientationBaker` redraw into the resize draw. It is a real second draw, but measured at ~10 ms
+  of ~129 ms (AVIF @50%: 119 ms upright vs 129 ms orientation-6), and buying it back would spread
+  orientation logic across three files and make the resize silently do two different things.
+  Also **deliberately no "writes nothing to disk" test**: the first attempt snapshotted the shared
+  system temp directory and was flaky under parallel suites, and scoping it properly would mean
+  adding an injectable temp directory to production code to prove something the `CGImage` return
+  type already states. The reasoning sits in `ImageResizerTests` so nobody re-adds it.
+
+
 ## 2026-10-19 · claude-code — merged both branches to main
 
 - **Did:** Merged `claude/objective-visvesvaraya-4d3c56` (metadata preservation) then
