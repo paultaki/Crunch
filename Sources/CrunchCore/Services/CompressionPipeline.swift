@@ -57,7 +57,14 @@ public enum CompressionPipeline {
         // compressor that sourced metadata from its own input would preserve
         // everything at 100% resolution and silently discard all of it at
         // 99%, which is a far nastier failure than losing it outright.
-        let metadata = ImageMetadata.read(from: file.url)
+        //
+        // Stripping reduces to orientation rather than to nothing, because
+        // orientation is the one tag whose absence is a *visual* defect
+        // rather than a privacy gain — see `ImageMetadata.orientationOnly`.
+        let sourceMetadata = ImageMetadata.read(from: file.url)
+        let metadata = settings.stripMetadata
+            ? sourceMetadata?.orientationOnly()
+            : sourceMetadata
 
         let resize: (Int, Int)?
         if resolutionPercent < 100 {

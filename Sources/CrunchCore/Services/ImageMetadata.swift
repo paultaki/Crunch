@@ -21,6 +21,17 @@ public struct ImageMetadata: @unchecked Sendable {
     /// mutated or shared for writing.
     let properties: [CFString: Any]
 
+    /// Whether this is a verbatim copy of the source file's own metadata.
+    ///
+    /// Matters for exactly one caller, and only because of how cwebp works:
+    /// it cannot be handed a property dictionary, it copies metadata out of
+    /// the file it is given — wholesale with `-metadata all`, or not at all.
+    /// A verbatim copy can therefore be satisfied by pointing cwebp at the
+    /// user's original. A reduced set cannot: `-metadata all` would copy back
+    /// everything the reduction was meant to remove. See `WebPCompressor`,
+    /// which re-embeds a reduced set into a substitute input instead.
+    let isVerbatimCopyOfSource: Bool
+
     /// The property dictionaries worth carrying from one encoding to the
     /// next, in the order ImageIO names them.
     ///
@@ -43,8 +54,9 @@ public struct ImageMetadata: @unchecked Sendable {
         kCGImagePropertyOrientation
     ]}
 
-    private init(properties: [CFString: Any]) {
+    private init(properties: [CFString: Any], isVerbatimCopyOfSource: Bool) {
         self.properties = properties
+        self.isVerbatimCopyOfSource = isVerbatimCopyOfSource
     }
 
     /// Reads the preserved metadata from `url`, or `nil` when the file
@@ -59,7 +71,9 @@ public struct ImageMetadata: @unchecked Sendable {
         for key in preservedKeys where all[key] != nil {
             kept[key] = all[key]
         }
-        return kept.isEmpty ? nil : ImageMetadata(properties: kept)
+        return kept.isEmpty
+            ? nil
+            : ImageMetadata(properties: kept, isVerbatimCopyOfSource: true)
     }
 
     /// The EXIF orientation, or 1 ("already upright") when the file does not
@@ -86,9 +100,33 @@ public struct ImageMetadata: @unchecked Sendable {
             tiff[kCGImagePropertyTIFFOrientation] = 1
             updated[kCGImagePropertyTIFFDictionary] = tiff
         }
-        return ImageMetadata(properties: updated)
+        return ImageMetadata(properties: updated, isVerbatimCopyOfSource: false)
     }
 
+    /// Just the orientation, dropping everything that identifies the photo,
+    /// the camera or the place it was taken. `nil` when the image is already
+    /// upright and there is therefore nothing worth writing at all.
+    ///
+    /// This is what "Strip metadata" actually produces, and the reason it is
+    /// not simply `nil`: orientation is a *rendering instruction*, not
+    /// information about the user. An EXIF "rotate 90°" tag exists because
+    /// the pixels are stored sideways, so dropping it alongside the GPS
+    /// coordinates does not protect anyone — it just hands back a photo that
+    /// every viewer draws on its side. Stripping should cost a photo its
+    /// history, not its correctness.
+    public func orientationOnly() -> ImageMetadata? {
+        let value = orientation
+        guard !OrientationBaker.isUpright(value) else { return nil }
+        return ImageMetadata(
+            properties: [
+                kCGImagePropertyOrientation: value,
+                kCGImagePropertyTIFFDictionary: [
+                    kCGImagePropertyTIFFOrientation: value
+                ] as [CFString: Any]
+            ],
+            isVerbatimCopyOfSource: false
+        )
+    }
 
     /// The options dictionary for `CGImageDestinationAddImage`: this
     /// metadata, plus the caller's quality.

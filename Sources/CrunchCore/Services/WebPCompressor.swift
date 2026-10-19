@@ -33,8 +33,24 @@ enum WebPCompressor {
             throw CompressionError.toolMissing("cwebp")
         }
 
-        let needsNormalization = !ImageNormalizer.cwebpDecodableExtensions
+        // Two reasons to hand cwebp a substitute PNG instead of the file we
+        // were given: it cannot decode the format (AVIF, in practice), or the
+        // metadata we have to apply is a reduced set that `-metadata all`
+        // cannot express — it would copy the original's GPS straight back in.
+        // Re-embedding the reduced set into the substitute makes "copy
+        // everything from the input" copy exactly what we want.
+        //
+        // That substitute costs a full lossless PNG encode, so it is worth
+        // being clear about when it happens: only when metadata is being
+        // stripped AND the source is not already upright, since an upright
+        // source reduces to no metadata at all and takes the fast path.
+        // Measured on a 4032x3024 photo: 1.5s normally, 2.5s on that one
+        // combination. Paid so that stripping a photo's history does not
+        // also hand it back on its side.
+        let cannotDecodeInput = !ImageNormalizer.cwebpDecodableExtensions
             .contains(input.pathExtension.lowercased())
+        let metadataNeedsRewriting = metadata.map { !$0.isVerbatimCopyOfSource } ?? false
+        let needsNormalization = cannotDecodeInput || metadataNeedsRewriting
         let cwebpInput: URL = try needsNormalization
             ? ImageNormalizer.encodeAsPNG(from: input, metadata: metadata)
             : input
@@ -46,10 +62,9 @@ enum WebPCompressor {
 
         var arguments = ["-q", "\(quality)"]
 
-        // cwebp strips metadata unless told otherwise. That is its
-        // documented default, and running it confirms the default is real:
-        // without this flag every tag is gone from the output; with it they
-        // all survive, orientation included.
+        // cwebp strips metadata unless told otherwise — its documented
+        // default, confirmed by running it. Omitting the flag is therefore
+        // exactly what the user's "Strip metadata" setting asks for.
         if metadata != nil {
             arguments += ["-metadata", "all"]
         }

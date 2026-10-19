@@ -274,6 +274,125 @@ struct MetadataPreservationTests {
         #expect(TestImageFactory.renderedAppearance(of: output.url) == before)
     }
 
+    // And with metadata stripped on purpose, which must cost the photo its
+    // history and not its orientation.
+    @Test(
+        "a sideways-stored photo renders the same way up even when stripped",
+        arguments: [OutputFormat.jpeg, .png, .webp, .avif]
+    )
+    func renderedAppearanceSurvivesStripping(outputFormat: OutputFormat) async throws {
+        try requireTooling(for: outputFormat)
+
+        let source = try TestImageFactory.makeMarkerImageWithMetadata(format: .jpeg)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let before = TestImageFactory.renderedAppearance(of: source)
+        let output = try await compress(source, outputFormat: outputFormat, stripMetadata: true)
+        defer { try? FileManager.default.removeItem(at: output.url) }
+
+        #expect(TestImageFactory.renderedAppearance(of: output.url) == before)
+        #expect(TestImageFactory.readMetadata(from: output.url).hasNoIdentifyingData)
+    }
+
+    // MARK: - Stripping on purpose
+
+    // The other half of the feature. Removing GPS before publishing a photo
+    // is a legitimate thing to want; the bug was doing it to everyone, always,
+    // without asking. These tests pin that the toggle actually reaches every
+    // encoder — each one disables metadata by a different mechanism, so a
+    // single format passing proves nothing about the others.
+    @Test("stripping removes everything from JPEG output")
+    func jpegStripsMetadata() async throws {
+        let source = try TestImageFactory.makeImageWithMetadata(format: .jpeg)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let output = try await compress(source, outputFormat: .jpeg, stripMetadata: true)
+        defer { try? FileManager.default.removeItem(at: output.url) }
+
+        let metadata = TestImageFactory.readMetadata(from: output.url)
+        #expect(metadata.hasNoIdentifyingData)
+        // ...but still the right way up. Stripping is about identifying
+        // information, not about handing back a sideways photo.
+        #expect(metadata.orientation == TestMetadata.orientation)
+    }
+
+    // Worth its own test because pngquant does NOT strip completely on its
+    // own: it drops the EXIF but leaves the XMP packet, which still carries
+    // capture date and GPS. Stripping has to remove that too, or "Strip
+    // metadata" would quietly leak a photo's location.
+    @Test(
+        "stripping removes everything from PNG output, XMP packet included",
+        .enabled(if: ToolChecker.pngquantPath != nil)
+    )
+    func pngStripsMetadata() async throws {
+        let source = try TestImageFactory.makeImageWithMetadata(format: .png)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let output = try await compress(source, outputFormat: .png, stripMetadata: true)
+        defer { try? FileManager.default.removeItem(at: output.url) }
+
+        let metadata = TestImageFactory.readMetadata(from: output.url)
+        #expect(metadata.hasNoIdentifyingData)
+        #expect(metadata.orientation == TestMetadata.orientation)
+        // Still a valid PNG of the right size after the chunks came out.
+        let reloaded = try #require(ImageFile.load(from: output.url))
+        #expect(reloaded.pixelWidth == 160)
+    }
+
+    @Test(
+        "stripping removes everything from WebP output",
+        .enabled(if: ToolChecker.cwebpPath != nil)
+    )
+    func webpStripsMetadata() async throws {
+        let source = try TestImageFactory.makeImageWithMetadata(format: .png)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let output = try await compress(source, outputFormat: .webp, stripMetadata: true)
+        defer { try? FileManager.default.removeItem(at: output.url) }
+
+        // The awkward one: cwebp copies metadata wholesale or not at all, so
+        // keeping orientation while dropping GPS means re-embedding the
+        // reduced set into a substitute input rather than passing a flag.
+        let metadata = TestImageFactory.readMetadata(from: output.url)
+        #expect(metadata.hasNoIdentifyingData)
+        #expect(metadata.orientation == TestMetadata.orientation)
+    }
+
+    @Test(
+        "stripping removes everything from AVIF output",
+        .enabled(if: OutputFormat.avifEncodingSupported)
+    )
+    func avifStripsMetadata() async throws {
+        let source = try TestImageFactory.makeImageWithMetadata(format: .avif)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let output = try await compress(source, outputFormat: .avif, stripMetadata: true)
+        defer { try? FileManager.default.removeItem(at: output.url) }
+
+        #expect(TestImageFactory.readMetadata(from: output.url).hasNoIdentifyingData)
+    }
+
+    // Stripping must not also throw away the user's orientation *correction*
+    // on AVIF. The tag cannot be written to AVIF at all, so if the pixels are
+    // not rotated the photo is wrong on screen — which is a visual defect, not
+    // a privacy choice. Stripping is about identifying information.
+    @Test(
+        "stripping an AVIF still leaves the photo the right way up",
+        .enabled(if: OutputFormat.avifEncodingSupported)
+    )
+    func avifStripKeepsPhotoUpright() async throws {
+        let source = try TestImageFactory.makeImageWithMetadata(format: .jpeg)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let output = try await compress(source, outputFormat: .avif, stripMetadata: true)
+        defer { try? FileManager.default.removeItem(at: output.url) }
+
+        let metadata = TestImageFactory.readMetadata(from: output.url)
+        #expect(metadata.hasNoIdentifyingData)
+        #expect(metadata.pixelWidth == 96)
+        #expect(metadata.pixelHeight == 160)
+    }
+
     // MARK: - Helper
 
     /// Skips a parameterized case when this machine lacks the encoder it
@@ -296,13 +415,15 @@ struct MetadataPreservationTests {
     private func compress(
         _ source: URL,
         outputFormat: OutputFormat,
-        resolutionPercent: Int = 100
+        resolutionPercent: Int = 100,
+        stripMetadata: Bool = false
     ) async throws -> CompressionPipeline.Output {
         let file = try #require(ImageFile.load(from: source))
         let settings = CompressionSettings(
             outputFormat: outputFormat,
             resolutionPercent: resolutionPercent,
-            quality: 80
+            quality: 80,
+            stripMetadata: stripMetadata
         )
         return try await CompressionPipeline.run(
             file: file,

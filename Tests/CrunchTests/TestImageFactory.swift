@@ -190,6 +190,19 @@ struct ReadMetadata {
             && latitude == TestMetadata.latitude
     }
 
+    /// True when nothing that identifies the photo, the camera or the place
+    /// survived. This, not "no properties at all", is what the strip-metadata
+    /// tests assert.
+    ///
+    /// Orientation is excluded deliberately, on two grounds. It is a
+    /// rendering instruction rather than information about the user, so
+    /// stripping keeps it (see `ImageMetadata.orientationOnly`). And it could
+    /// not be asserted away regardless: ImageIO reports `Orientation = 1` for
+    /// a container that says nothing about orientation at all, so "absent"
+    /// and "upright" are indistinguishable from the outside.
+    var hasNoIdentifyingData: Bool {
+        dateTimeOriginal == nil && userComment == nil && make == nil && latitude == nil
+    }
 }
 
 extension TestImageFactory {
