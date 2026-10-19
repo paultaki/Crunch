@@ -8,14 +8,28 @@ enum PNGCompressor {
     /// re-encode the source to a temporary PNG first via `ImageNormalizer`
     /// and feed that to pngquant. The temp file is cleaned up before
     /// returning.
-    static func compress(input: URL, output: URL, quality: Int) async throws {
+    ///
+    /// `metadata` is the user's ORIGINAL metadata, written back onto the
+    /// finished file by `PNGMetadataWriter` rather than passed to pngquant,
+    /// which strips metadata by default on macOS and offers no way to stop
+    /// it. That post-pass is also what makes stripping honest here: pngquant
+    /// alone drops the EXIF but leaves the XMP packet, capture date and GPS
+    /// included.
+    static func compress(
+        input: URL,
+        output: URL,
+        quality: Int,
+        metadata: ImageMetadata?
+    ) async throws {
         guard let pngquant = ToolChecker.pngquantPath else {
             throw CompressionError.toolMissing("pngquant")
         }
 
         let needsNormalization = input.pathExtension.lowercased() != "png"
+        // No metadata needed in the substitute: unlike cwebp, pngquant never
+        // carries it through anyway, so it is applied to the output below.
         let pngInput: URL = try needsNormalization
-            ? ImageNormalizer.encodeAsPNG(from: input)
+            ? ImageNormalizer.encodeAsPNG(from: input, metadata: nil)
             : input
         defer {
             if needsNormalization {
@@ -55,6 +69,7 @@ enum PNGCompressor {
                     stderr: retry.stderr
                 )
             }
+            try PNGMetadataWriter.apply(metadata, to: output)
             return
         }
 
@@ -65,5 +80,7 @@ enum PNGCompressor {
                 stderr: result.stderr
             )
         }
+
+        try PNGMetadataWriter.apply(metadata, to: output)
     }
 }

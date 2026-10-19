@@ -47,6 +47,18 @@ public enum CompressionPipeline {
         let quality = settings.quality
         let resolutionPercent = settings.resolutionPercent
 
+        // Read from the user's original, deliberately — and read it HERE,
+        // before any intermediate exists, so there is no later temptation to
+        // read it from whatever file the compressor ends up being handed.
+        //
+        // That distinction is the whole bug. Below, a resize writes a plain
+        // intermediate via `ImageResizer` and the compressor's input becomes
+        // that temp, which carries none of the original's metadata. A
+        // compressor that sourced metadata from its own input would preserve
+        // everything at 100% resolution and silently discard all of it at
+        // 99%, which is a far nastier failure than losing it outright.
+        let metadata = ImageMetadata.read(from: file.url)
+
         let resize: (Int, Int)?
         if resolutionPercent < 100 {
             resize = file.resizedDimensions(percent: resolutionPercent)
@@ -97,26 +109,30 @@ public enum CompressionPipeline {
             try await PNGCompressor.compress(
                 input: compressionInput,
                 output: tempOutput,
-                quality: quality
+                quality: quality,
+                metadata: metadata
             )
         case .jpeg:
             try await JPEGCompressor.compress(
                 input: compressionInput,
                 output: tempOutput,
-                quality: quality
+                quality: quality,
+                metadata: metadata
             )
         case .webp:
             try await WebPCompressor.compress(
                 input: compressionInput,
                 output: tempOutput,
                 quality: quality,
-                resize: resize
+                resize: resize,
+                metadata: metadata
             )
         case .avif:
             try await AVIFCompressor.compress(
                 input: compressionInput,
                 output: tempOutput,
-                quality: quality
+                quality: quality,
+                metadata: metadata
             )
         }
 

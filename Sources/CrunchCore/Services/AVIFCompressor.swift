@@ -11,7 +11,21 @@ import ImageIO
 /// that can decode but not encode AVIF. Guarding here, rather than only at
 /// the picker, keeps that path a clear error instead of a raw ImageIO nil.
 enum AVIFCompressor {
-    static func compress(input: URL, output: URL, quality: Int) async throws {
+    /// `metadata` comes from the user's ORIGINAL file, never from `input` —
+    /// see `JPEGCompressor.compress` for why.
+    ///
+    /// AVIF is the one format where orientation cannot ride along as a tag:
+    /// ImageIO's AVIF encoder forces it to 1 regardless of what it is handed
+    /// (measured 2026-10-19). The rotation is therefore applied to the pixels
+    /// before encoding, and the tag rewritten to "upright" so nothing rotates
+    /// it twice. Everything else — capture date, camera, GPS — does survive
+    /// as ordinary metadata.
+    static func compress(
+        input: URL,
+        output: URL,
+        quality: Int,
+        metadata: ImageMetadata?
+    ) async throws {
         guard OutputFormat.avifEncodingSupported else {
             throw CompressionError.avifNotSupported
         }
@@ -19,10 +33,16 @@ enum AVIFCompressor {
         let qualityFloat = Double(quality) / 100.0
 
         guard let imageSource = CGImageSourceCreateWithURL(input as CFURL, nil),
-              let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
+              let decoded = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
         else {
             throw CompressionError.cannotReadImage(input.lastPathComponent)
         }
+
+        let orientation = metadata?.orientation ?? 1
+        let cgImage = OrientationBaker.bake(decoded, orientation: orientation) ?? decoded
+        let uprightMetadata = OrientationBaker.isUpright(orientation)
+            ? metadata
+            : metadata?.markedUpright()
 
         guard let destination = CGImageDestinationCreateWithURL(
             output as CFURL,
@@ -33,11 +53,12 @@ enum AVIFCompressor {
             throw CompressionError.cannotWriteImage(output.lastPathComponent)
         }
 
-        let options: [CFString: Any] = [
-            kCGImageDestinationLossyCompressionQuality: qualityFloat
-        ]
+        let options = ImageMetadata.destinationOptions(
+            metadata: uprightMetadata,
+            quality: qualityFloat
+        )
 
-        CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
+        CGImageDestinationAddImage(destination, cgImage, options)
 
         guard CGImageDestinationFinalize(destination) else {
             throw CompressionError.cannotWriteImage(output.lastPathComponent)

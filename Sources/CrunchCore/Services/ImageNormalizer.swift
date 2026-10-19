@@ -19,8 +19,15 @@ enum ImageNormalizer {
     /// user's quality setting downstream, and a lossy hop here would stack a
     /// second, uncontrolled generation of loss on top of it.
     ///
+    /// `metadata` is embedded into the substitute when the caller needs the
+    /// original's metadata to survive the hop. Only `WebPCompressor` does:
+    /// cwebp can copy metadata only out of the file it is handed, so a bare
+    /// substitute would leave `-metadata all` with nothing to copy.
+    /// `PNGCompressor` passes nil because pngquant discards metadata
+    /// regardless and gets it written back afterwards instead.
+    ///
     /// The caller owns the returned file and must delete it.
-    static func encodeAsPNG(from source: URL) throws -> URL {
+    static func encodeAsPNG(from source: URL, metadata: ImageMetadata?) throws -> URL {
         guard let imageSource = CGImageSourceCreateWithURL(source as CFURL, nil),
               let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
         else {
@@ -39,7 +46,7 @@ enum ImageNormalizer {
             throw CompressionError.cannotWriteImage(tempURL.lastPathComponent)
         }
 
-        CGImageDestinationAddImage(destination, cgImage, nil)
+        CGImageDestinationAddImage(destination, cgImage, metadata?.properties as CFDictionary?)
 
         guard CGImageDestinationFinalize(destination) else {
             throw CompressionError.cannotWriteImage(tempURL.lastPathComponent)
