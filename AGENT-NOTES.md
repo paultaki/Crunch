@@ -1,5 +1,33 @@
 # Agent Notes
 
+## 2026-10-19 · claude-code — merged both branches to main
+
+- **Did:** Merged `claude/objective-visvesvaraya-4d3c56` (metadata preservation) then
+  `claude/unruffled-jepsen-1fb9a1` (concurrent drop ingestion) into `main` as
+  `c3980b4` and `3d18870`. Only `AGENT-NOTES.md` conflicted, both times; resolved by
+  keeping every entry and retitling the three same-day ones. **69 tests green** on
+  merged main (46 before), release build clean.
+- **Why:** The two branches were developed independently in separate worktrees, so the
+  combination needed verifying rather than assuming — and landing the metadata work
+  unblocks the deferred resize change.
+- **Verified independently, not just via the suite:** compiled a probe against the
+  merged CrunchCore sources and ran a sideways-stored portrait JPEG (orientation 6 +
+  EXIF + GPS) through `CompressionPipeline`. JPEG-preserve keeps orientation 6 and all
+  tags; AVIF-preserve reports orientation 1 but **renders identically** (OrientationBaker
+  bakes the rotation in, because ImageIO's AVIF encoder drops the tag); JPEG-strip drops
+  EXIF/GPS but **retains orientation**, so opting into privacy does not rotate the photo.
+  All three render 200x100, same as the source. The audit's headline bug is genuinely fixed.
+- **Next:** Audit item 02 is still open and now unblocked — `ImageResizer` returns a URL,
+  so every resize encodes a lossless PNG to disk and immediately re-decodes it (measured
+  110 ms vs 22 ms for a 12 MP photo, 8.7 MB of throwaway temp per file). It was deferred
+  to avoid two sessions writing the same compressor signatures; those signatures have now
+  changed under it, so re-measure before changing anything.
+- **Watch out:** Nothing is pushed — `main` is ahead of `origin/main` by five commits.
+  The two worktrees still exist under `.claude/worktrees/`. Also: `~/.claude/CLAUDE.md`
+  claims attribution is "disabled globally via ~/.claude/settings.json", but **there is no
+  such key in settings.json** — 7 of the last 8 commits carry no trailer, so no-trailer is
+  the real convention, but the stated reason is wrong and keeps misleading agents.
+
 ## 2026-10-19 · claude-code — concurrent drop ingestion
 
 - **Did:** Made drop ingestion concurrent and order-preserving. `ImageFile.loadBatch(from:)`
